@@ -11,7 +11,7 @@ def is_inside_bbox(block, bbox):
            (bbox[1] <= block[3] <= bbox[3])
 
 
-def print_n_pages(fdir, fname, n=None, display='blocks', metadata=True, header_height: int = 50, footer_height: int = 50):
+def print_n_pages(fdir, fname, start_page=0, end_page=None, display='blocks', metadata=True, header_height: int = 50, footer_height: int = 50):
     """
     Faili esialgseks läbivaatuseks.
     `display` võib olla "blocks" (elementide koordinaatidega) või "text" (puhas tekst)
@@ -24,16 +24,16 @@ def print_n_pages(fdir, fname, n=None, display='blocks', metadata=True, header_h
             print(fname)
             print(doc.metadata)
 
-        if not n:
-            n = doc.page_count
-        page_no = 0
+        if end_page is None or end_page >= doc.page_count:
+            end_page = doc.page_count - 1
 
-        for page in doc:
+        for page_no in range(start_page, end_page + 1):
+            page = doc.load_page(page_no)
             print(
                 f'Height and width of page: {page.rect.height}, {page.rect.width}')
             print('footer_bbox', (0, page.rect.height -
                   footer_height, page.rect.width, page.rect.height))
-            print('header_bbox', (0,  0, page.rect.width,  header_height))
+            print('header_bbox', (0,  0, page.rect.width, header_height))
             text = page.get_text(display, sort=True)
             if display == 'blocks':
                 for block in text:
@@ -41,9 +41,6 @@ def print_n_pages(fdir, fname, n=None, display='blocks', metadata=True, header_h
             else:
                 print(text)
             print('-'*25, f'PAGE {page_no} BREAK', '-'*25)
-            page_no += 1
-            if page_no == n:
-                break
 
 
 def is_table(tab: fitz.table.Table, min_row_count: int = 2, min_col_count: int = 2):
