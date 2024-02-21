@@ -1,6 +1,7 @@
 from collections import defaultdict
 import fitz
 import os
+import re
 
 
 def is_inside_bbox(block, bbox):
@@ -20,6 +21,9 @@ def print_n_pages(fdir, fname, start_page=0, end_page=None, display='blocks', me
     document_path = os.path.join(fdir, fname)
 
     with fitz.open(document_path) as doc:
+
+        doc_footnotes = []
+
         if metadata:
             print(fname)
             print(doc.metadata)
@@ -35,12 +39,24 @@ def print_n_pages(fdir, fname, start_page=0, end_page=None, display='blocks', me
                   footer_height, page.rect.width, page.rect.height))
             print('header_bbox', (0,  0, page.rect.width, header_height))
             text = page.get_text(display, sort=True)
+
             if display == 'blocks':
-                for block in text:
-                    print(block)
+                total_blocks_count = len(text)
+                for index, block in enumerate(text):
+                    if is_footnote(block[4], index, total_blocks_count):
+                        page_footnotes = extract_footnotes(block[4].strip())
+                        # Lisab ühe lehekülge footnote'id terve dokumendi footnote'idele
+                        for footnote in page_footnotes:
+                            doc_footnotes.append(footnote)
+
+                    else:
+                        print(block)
             else:
                 print(text)
+                
             print('-'*25, f'PAGE {page_no} BREAK', '-'*25)
+        
+        print(doc_footnotes)
 
 
 def is_table(tab: fitz.table.Table, min_row_count: int = 2, min_col_count: int = 2):
@@ -84,3 +100,38 @@ def calculate_header_and_footer_box(page_obj: fitz.Page, header_height: int = 50
 
 def calculate_content_box(page_obj: fitz.Page, header_height: int = 50, footer_height: int = 50):
     return (0, header_height, page_obj.rect.width, page_obj.rect.height - footer_height)
+
+
+def is_footnote(text, current_block_index, total_blocks):
+    """
+    Footnote'i tingimused:
+    1. Footnote algab numbri ja tühikuga, millele järgneb sõna. Võtab arvesse, et ühes blockis võib olla mitu footnote'i (seepärast re.MULTILINE).
+    2. Enne footnote'i on rohkem blocke kui pärast footnote'i.
+    """
+    footnote_pattern = r'^\d+\s\w'
+    footnote_match = re.match(footnote_pattern, text.strip(), re.MULTILINE)
+    is_pattern_footnote = bool(footnote_match)
+
+    is_position_footnote = (total_blocks - current_block_index) < current_block_index
+
+    if is_pattern_footnote and is_position_footnote:
+        return True
+    else:
+        return False
+    
+
+def extract_footnotes(text):
+    """
+    Jagab ühelt leheküljelt saadud footnote'id üksikuteks footnote'ideks.
+    """
+    lines = text.split('\n')
+    page_footnotes = []
+
+    footnote_pattern = r'^\d+\s+(.*)'
+    for line in lines:
+        match = re.match(footnote_pattern, line)
+        if match:
+            footnote_text = match.group(1)
+            page_footnotes.append(footnote_text)
+
+    return page_footnotes
