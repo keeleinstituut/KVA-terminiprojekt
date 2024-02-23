@@ -1,4 +1,6 @@
 from collections import defaultdict
+import itertools
+import json
 import fitz
 import os
 import re
@@ -12,7 +14,7 @@ def is_inside_bbox(block, bbox):
            (bbox[1] <= block[3] <= bbox[3])
 
 
-def print_n_pages(fdir, fname, start_page=0, end_page=None, display='blocks', metadata=True, header_height: int = 50, footer_height: int = 50):
+def print_n_pages(fdir, fname, start_page=0, end_page=None, display='blocks', metadata=True, header_height: int = 50, footer_height: int = 50, horizontal_sorting: bool = True):
     """
     Faili esialgseks läbivaatuseks.
     `display` võib olla "blocks" (elementide koordinaatidega) või "text" (puhas tekst)
@@ -38,7 +40,7 @@ def print_n_pages(fdir, fname, start_page=0, end_page=None, display='blocks', me
             print('footer_bbox', (0, page.rect.height -
                   footer_height, page.rect.width, page.rect.height))
             print('header_bbox', (0,  0, page.rect.width, header_height))
-            text = page.get_text(display, sort=True)
+            text = page.get_text(display, sort=horizontal_sorting)
 
             if display == 'blocks':
                 total_blocks_count = len(text)
@@ -135,3 +137,10 @@ def extract_footnotes(text):
             page_footnotes.append(footnote_text)
 
     return page_footnotes
+
+def join_jsons(term_json_list: list):
+    merged_list = []
+    for term_json in term_json_list:
+        merged_list.extend(json.loads(term_json))
+
+    return json.dumps(merged_list)
