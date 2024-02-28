@@ -12,21 +12,52 @@ def print_single_search_results(query, source_language, target_languages):
 
     result = entries_requests.perform_single_search(access_token, query, source_language, target_languages)
 
+    concept = json.dumps(result, indent=4)
+
     if result:
-        print(result)
         if 'items' in result:
             for item in result['items']:
 
                 entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'])
 
-                print('Otsing: ' + query)
+                print(f"ID: {entry['id']}")
+                for domain in entry['domains']:
+                    print(f"Valdkonna kood: {domain['code']}")
 
-                print('\nDefinitsioonid\n')
+                print(f"Loomise aeg: {entry['metadata']['creation']['timestamp']}")
+                print(f"Muutmise aeg: {entry['metadata']['modification']['timestamp']}")
+                print(f"Olek: {entry['metadata']['status']} \n")
 
-                print(source_language + ': ' + entry['language'][source_language]['definition'])
-                
                 for tl in target_languages:
-                    print(tl + ': ' + entry['language'][tl]['definition'])
+                    if tl in entry['language']:
+                        lang_data = entry['language'][tl]
+                        print(f"{tl.upper()}:")
+                        print(f"Definitsioon: {lang_data['definition']}")
+
+                        for def_ref in lang_data['definition_references']:
+                            print(f"Definitisiooni allikaviide: {def_ref['text']}")
+
+                        if 'term_entries' in lang_data:
+                            for term_entry in lang_data['term_entries']:
+                                print(f"\nTermin: {term_entry['term_value']}")
+
+                                if 'term_references' in term_entry:
+                                    for term_reference in term_entry['term_references']:
+                                        print(f"Termini allikaviide: {term_reference['text']}")
+
+                                
+                                if 'contexts' in term_entry:
+                                    for context in term_entry['contexts']:
+                                        print(f"Termini kasutusnäide: {context['context']}")
+                                        if 'reference' in context:
+                                            print(f"Termini kasutusnäite allikaviide: {context['reference']}")
+
+                                if 'metadata' in term_entry:
+                                    print(f"Termini usaldusväärsus: {term_entry['metadata']['reliability']}")
+                                                   
+                    else:
+                        print(f"Selles keeles tulemusi pole: {tl}")
+                    print('\n')
         else:
             print('Tulemusi pole.')
     else:
