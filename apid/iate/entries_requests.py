@@ -76,18 +76,3 @@ def perform_multi_search(access_token, queries, source, targets, **kwargs):
         return response.json()
     else:
         return {'error': 'Failed to perform search', 'details': response.text}
-    
-
-def get_term_entry(access_token, href):
-
-    headers = {
-        'Authorization': f'Bearer {access_token}',
-        'Accept': 'application/json'
-    }
-
-    response = requests.get(href, headers=headers)
-
-    if response.status_code == 200:
-        return response.json()
-    else:
-        return response.status_code
