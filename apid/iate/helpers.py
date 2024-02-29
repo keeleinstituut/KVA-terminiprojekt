@@ -1,7 +1,8 @@
-import authentication_requests
-import catalogue_requests
+from . import authentication_requests
+from . import catalogue_requests
+from . import entries_requests
 import json
-import entries_requests
+
 
 def print_single_search_results(query, source_language, target_languages, optional_parameters):
 
