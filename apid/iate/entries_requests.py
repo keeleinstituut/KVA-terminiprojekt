@@ -10,15 +10,31 @@ def perform_single_search(access_token, query, source, targets, **kwargs):
     :param query: The query string to search for.
     :param source: The source language of the terminology data.
     :param targets: A list of target languages for the terminology data.
-    :param kwargs: Additional optional parameters (expand, offset, limit, fields_set_name, search_in_fields, search_in_term_types, filter_by_domains, cascade_domains, query_operator, filter_by_entry_collection, filter_by_entry_institution_owner, filter_by_entry_primarity, filter_by_source_term_reliability, filter_by_target_term_reliability, etc.)
+    :param kwargs: Additional optional parameters (expand, 
+                                                    offset, 
+                                                    limit, 
+                                                    fields_set_name, 
+                                                    search_in_fields, 
+                                                    search_in_term_types, 
+                                                    filter_by_domains, 
+                                                    cascade_domains, 
+                                                    query_operator, 
+                                                    filter_by_entry_collection, 
+                                                    filter_by_entry_institution_owner, 
+                                                    filter_by_entry_primarity, 
+                                                    filter_by_source_term_reliability, 
+                                                    filter_by_target_term_reliability, etc.)
     """
     url = "https://iate.europa.eu/em-api/entries/_search"
 
+    default_kwargs = {'query_operator': 2}
+    
     search_request = {
         "query": query,
         "source": source,
         "targets": targets,
-        **kwargs
+        **default_kwargs, 
+        **kwargs           
     }
 
     json_payload = json.dumps(search_request)

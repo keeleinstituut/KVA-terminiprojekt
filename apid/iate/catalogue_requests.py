@@ -82,3 +82,31 @@ def get_reliabilities(access_token):
         return response.json()
     else:
         return response.status_code
+    
+
+def get_query_operators(access_token):
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Accept': 'application/json'
+    }
+
+    response = requests.get('https://iate.europa.eu/em-api/inventories/_query-operators', headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return response.status_code
+    
+
+def get_searchable_fields(access_token):
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Accept': 'application/json'
+    }
+
+    response = requests.get('https://iate.europa.eu/em-api/inventories/_searchable-fields', headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return response.status_code
