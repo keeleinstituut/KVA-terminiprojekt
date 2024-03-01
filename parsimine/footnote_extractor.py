@@ -39,9 +39,6 @@ class FootnoteExtractor:
         footnotes = list()
         footnote_bboxes = list()
 
-        if header_height is not None and footer_height is not None:
-            clip = calculate_content_box(page, header_height, footer_height)
-
         page_blocks = page.get_text('blocks', sort=True, clip=calculate_content_box(page, header_height, footer_height))
         
         total_blocks_count = len(page_blocks)
@@ -136,9 +133,9 @@ if __name__ == '__main__':
 
     # Extract tables from a specific page
     page = doc.load_page(25)  # Load the first page
-    footnotes = footnote_extractor.extract_tables_from_page(page)
+    footnotes = footnote_extractor.extract_footnotes_from_page(page)
     print(footnotes)
 
     # Extract tables from the entire document
-    footnotes_from_doc = footnote_extractor.extract_tables_from_doc(doc)
+    footnotes_from_doc = footnote_extractor.extract_footnotes_from_doc(doc)
     print(footnotes_from_doc)
