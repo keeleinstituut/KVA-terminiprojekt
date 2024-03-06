@@ -1,0 +1,11 @@
+{
+    "embedding_model": "intfloat/multilingual-e5-base",
+    "client": {
+        "host": "",
+        "port": 6333
+    },
+    "collection_name": "kva_test_collection",
+    "embedding_size": 768,
+    "max_tokens": 450,
+    "sentence_block_size": 5
+}
