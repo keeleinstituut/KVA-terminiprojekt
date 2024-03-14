@@ -97,7 +97,7 @@ def calculate_header_and_footer_box(page_obj: fitz.Page, header_height: int = 50
     header_bbox = (0,  0, page_obj.rect.width, header_height)
     footer_bbox = (0, page_obj.rect.height - footer_height,
                    page_obj.rect.width, page_obj.rect.height)
-    return [header_bbox, footer_bbox]
+    return header_bbox, footer_bbox
 
 
 def calculate_content_box(page_obj: fitz.Page, header_height: int = 50, footer_height: int = 50):
