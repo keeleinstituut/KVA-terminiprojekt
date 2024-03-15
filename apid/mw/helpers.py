@@ -1,67 +1,88 @@
-from . import entries_requests
-import json
+from copy import deepcopy
+import pandas as pd
+import re
 
-def search_results_to_json(result):
-    print(len(result))
-    results_json = {}
 
-    for r in result:
-        hom_nr = r.get('hom', 1) 
-        if hom_nr not in results_json:
+def refine_results(original_results):
+    refined_results = {}
+    for index, result in enumerate(original_results, start=1):
+        result_copy = deepcopy(result)
+        if 'meta' in result_copy:
+            del result_copy['meta']
+        if 'hwi' in result_copy and 'prs' in result_copy['hwi']:
+            del result_copy['hwi']['prs']
+        if 'uros' in result_copy:
+            for i in result_copy['uros']:
+                if 'prs' in i:
+                    del i['prs']
+        if 'date' in result_copy:
+            del result_copy['date']
+        refined_results[f'result_{index}'] = result_copy
+    return refined_results
 
-            results_json[hom_nr] = {
-                'headword': '',
-                'variants': [],
-                'functional_labels': '',
-                'general_labels': [],
-                'definitions': []
-            }
 
-        # Headword
-        if 'hwi' in r:
-            results_json[hom_nr]['headword'] = r['hwi']['hw']
+def json_to_df_with_definitions_and_usages(json_data):
+    rows = []
 
-        # Variants
-        if 'vrs' in r:
-            variants = []
-            for v in r['vrs']:
-                variant_pair = {v['vl']: v['va']}
-                variants.append(variant_pair)
-            results_json[hom_nr]['variants'] = variants
+    def clean_text(text):
+        text = text.replace('{bc}', '').replace('{wi}', '').replace('{/wi}', '').replace('{it}', '').replace('{/it}', '').replace('{parahw}', '').replace('{/parahw}', '')
+        text = re.sub(r'\{sx\|[^}]*\|\|\}', '', text)
+        text = text.strip()
+        return text
 
-        # Functional labels
-        if 'fl' in r:
-            results_json[hom_nr]['functional_labels'] = r['fl']
+    def extract_cxs(cxs_list):
+        cxs_text = []
+        for cxs_item in cxs_list:
+            cxs_label = cxs_item.get('cxl', '')
+            cxtis_text = ', '.join([clean_text(cxti.get('cxt', '')) for cxti in cxs_item.get('cxtis', [])])
+            cxs_text.append(f"{cxs_label} {cxtis_text}")
+        return '; '.join(cxs_text)
 
-        # General labels
-        if 'lbs' in r:
-            general_labels = [v for v in r['lbs']]
-            results_json[hom_nr]['general_labels'] = general_labels
+    def extract_definitions(def_list):
+        definitions = []
+        for definition in def_list:
+            if 'sseq' in definition:
+                for sseq_item in definition['sseq']:
+                    for sense in sseq_item:
+                        if 'dt' in sense[1]:
+                            for dt_item in sense[1]['dt']:
+                                if dt_item[0] == 'text':
+                                    cleaned_def = clean_text(dt_item[1])
+                                    definitions.append(cleaned_def)
+        return '; '.join(definitions)
 
-        # Definition section
-        if 'def' in r:
-            definitions = []
-            for d in r['def']:
-                def_item = {'vd': '', 'senses': []}
-                if 'vd' in d:
-                    def_item['vd'] = d['vd']
-                if 'sseq' in d:
-                    for sseq in d['sseq']:
-                        for sense in sseq:
-                            sense_data = {}
-                            if 'sn' in sense[1]:
-                                sense_data['sense_nr'] = sense[1]['sn']
-                            if 'dt' in sense[1]:
-                                dt_list = []
-                                for dt in sense[1]['dt']:
-                                    if dt[0] == 'text':
-                                        dt_list.append({'text': dt[1]})
-                                    elif dt[0] == 'vis':
-                                        vis_list = [{'t': v['t']} for v in dt[1]]
-                                        dt_list.append({'verbal_illustrations': vis_list})
-                                sense_data['defining_text'] = dt_list
-                            def_item['senses'].append(sense_data)
-                definitions.append(def_item)
-            results_json[hom_nr]['definitions'] = definitions
+    def extract_verbal_illustrations(def_list):
+        verbal_illustrations = []
+        for definition in def_list:
+            if 'sseq' in definition:
+                for sseq_item in definition['sseq']:
+                    for sense in sseq_item:
+                        if 'dt' in sense[1]:
+                            for dt_item in sense[1]['dt']:
+                                if dt_item[0] == 'vis':
+                                    for vis_item in dt_item[1]:
+                                        cleaned_vis = clean_text(vis_item['t'])
+                                        verbal_illustrations.append(cleaned_vis)
+        return '; '.join(verbal_illustrations)
 
-    return results_json
+    def extract_usages(usages_list):
+        usages = []
+        for usage in usages_list:
+            pl_text = clean_text(usage.get('pl', ''))
+            pt_texts = [clean_text(pt_item[1]) for pt_item in usage.get('pt', []) if pt_item[0] == 'text']
+            usages.append(f"{pl_text} {' '.join(pt_texts)}")
+        return '; '.join(usages)
+    
+    for result_key, result_value in json_data.items():
+        row = {
+            'Headword': clean_text(result_value.get('hwi', {}).get('hw', '')),
+            'Homonym': result_value.get('hom', ''),
+            'Functional Label': result_value.get('fl', ''),
+            'Cross References': extract_cxs(result_value.get('cxs', [])),
+            'Short Definitions': '; '.join(result_value.get('shortdef', [])),
+            'Long Definitions': extract_definitions(result_value.get('def', [])),
+            'Verbal Illustrations': extract_verbal_illustrations(result_value.get('def', [])),
+            'Usages': extract_usages(result_value.get('usages', []))
+        }
+        rows.append(row)
+    return pd.DataFrame(rows)
