@@ -1,2 +1,8 @@
 parsimine/data/
 parsimine/__pycache__
+apid/iate/.env
+apid/collins/.env
+apid/mw/.env
+apid/mw/__pycache__
+apid/collins/__pycache__
+apid/iate/__pycache__
