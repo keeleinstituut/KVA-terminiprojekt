@@ -5,9 +5,10 @@ from parser_utils import calculate_content_box
 
 class RegexBlockExtractor:
 
-    def __init__(self, regex_pattern = r"(\n\s*\n|^)((.|\n)*?)(?=\n\s*\n)", regex_group = 1):
+    def __init__(self, regex_pattern: re.Pattern = re.compile(r"(\n\s*\n|^)((.|\n)*?)(?=\n\s*\n|$)", flags=re.X), regex_group = 1, consider_block_borders = False):
         self.regex_pattern = regex_pattern
         self.regex_group = regex_group
+        self.consider_block_borders = consider_block_borders
 
     def extract_text_by_page(self, doc, page_ranges, header_height = 0, footer_height = 0):
         """
@@ -21,15 +22,28 @@ class RegexBlockExtractor:
         - str: JSON string containing page numbers and segmented lists of texts from those pages.
         """
         results = []
-        pattern = re.compile(self.regex_pattern)
+        pattern = self.regex_pattern
 
         for start, end in page_ranges:
             for page_num in range(start, end + 1):  # +1 to include the end page
                 if page_num < doc.page_count:  # Check if the page number is within the document
                     page = doc.load_page(page_num)
-                    full_text = page.get_text(clip=calculate_content_box(page, header_height=header_height, footer_height=footer_height))  # Extract full page text
-                    segments = pattern.findall(full_text)  # Segment text based on the class's regex pattern
-                    results.append({"page_number": page_num + 1, "texts": [segment[self.regex_group] for segment in segments]})  # +1 to make page number human-readable
+                    if not self.consider_block_borders:
+                        full_text = page.get_text(clip=calculate_content_box(page, header_height=header_height, footer_height=footer_height))  # Extract full page text
+                        segments = pattern.findall(full_text)  # Segment text based on the class's regex pattern
+                        results.append({"page_number": page_num + 1, "texts": [segment[self.regex_group] for segment in segments]})  # +1 to make page number human-readable
+                    else:
+                        blocks = page.get_text("blocks", clip=calculate_content_box(page, header_height=header_height, footer_height=footer_height))
+                        block_texts = [block[4] for block in blocks if block[4].strip()]
+                        texts = []
+                        for block_text in block_texts:
+                            print(block_text)
+                            segments = pattern.findall(block_text)
+                            if not segments:
+                                texts.append(block_text)
+                                continue
+                            texts.extend([segment[self.regex_group] for segment in segments])
+                        results.append({"page_number": page_num + 1, "texts": texts})  # +1 to make page number human-readable
 
         # Convert the results to JSON format
         json_result = json.dumps(results, indent=2)
