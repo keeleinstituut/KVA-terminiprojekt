@@ -83,6 +83,8 @@ def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk
 
     for i, chunk in enumerate(section_chunks, 1):    
         try:
+            if not chunk.get_text():
+                continue
             chunk_text = 'passage:' + chunk.get_text()
         except TypeError:
             print(chunk)
