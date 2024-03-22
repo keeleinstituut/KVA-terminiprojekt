@@ -62,7 +62,7 @@ class E5Tokenizer:
 
         token_data = list()
 
-        encoded_input = self.tokenizer.encode_plus(text, return_offsets_mapping=True, add_special_tokens=False)
+        encoded_input = self.tokenizer.encode_plus(text, return_offsets_mapping=True, add_special_tokens=False, verbose=False)
 
         # The 'offset_mapping' contains the start and end positions of each token in the original text
         offset_mapping = encoded_input['offset_mapping']
