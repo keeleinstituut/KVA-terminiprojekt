@@ -6,14 +6,14 @@ import json
 
 def print_single_search_results(query, source_language, target_languages, optional_parameters):
 
-    rel_list = create_reliabilites_list()
-
     tokens = authentication_requests.get_iate_tokens()
 
     access_token = tokens['tokens'][0]['access_token']
 
     result = entries_requests.perform_single_search(access_token, query, source_language, target_languages, **optional_parameters)
 
+    domains = catalogue_requests.get_domains(access_token)
+    
     if result:
         if 'items' in result:
             for item in result['items']:
@@ -22,7 +22,8 @@ def print_single_search_results(query, source_language, target_languages, option
 
                 print_two_columns("ID:", str(entry['id']))
                 for domain in entry['domains']:
-                    print_two_columns("Valdkonna kood:", domain['code'])
+
+                    print_two_columns("Valdkond:", (" > ".join(get_domain_hierarchy_by_code(domains, domain['code']))))
 
                 print_two_columns("Loomise aeg:", entry['metadata']['creation']['timestamp'])
                 print_two_columns("Muutmise aeg:", entry['metadata']['modification']['timestamp'])
@@ -55,11 +56,7 @@ def print_single_search_results(query, source_language, target_languages, option
                                         print_two_columns("Termini kasutusnäide:", context['context'])
                                         if 'reference' in context:
                                             print_two_columns("Termini kasutusnäite allikaviide:", context['reference']['text'])
-
-                                if 'metadata' in term_entry:
-                                    for rel in rel_list:
-                                        if rel['code'] == term_entry['metadata']['reliability']:
-                                            print_two_columns("Termini usaldusväärsus:", rel['name'])           
+      
                     else:
                         print_two_columns(f"Selles keeles tulemusi pole:", tl)
                     print('\n')
@@ -140,6 +137,36 @@ def print_domains():
             print(item['code'], item['name'])
     else:
         print('Tulemusi pole.')
+
+
+def get_domain_name_by_code(data, domain_code):
+    def search_domain(domains):
+        for domain in domains:
+            if domain['code'] == domain_code:
+                return domain['name']
+            
+            if 'subdomains' in domain:
+                name = search_domain(domain['subdomains'])
+                if name:
+                    return name
+    
+    return search_domain(data['items']) or domain_code
+
+
+def get_domain_hierarchy_by_code(data, domain_code, hierarchy=None):
+    if hierarchy is None:
+        hierarchy = []
+    
+    for item in data['items']:
+        if item['code'] == domain_code:
+            return hierarchy + [item['name']]
+        
+        if 'subdomains' in item:
+            subdomain_result = get_domain_hierarchy_by_code({'items': item['subdomains']}, domain_code, hierarchy + [item['name']])
+            if subdomain_result:
+                return subdomain_result
+    
+    return None
 
 
 def print_term_types():
