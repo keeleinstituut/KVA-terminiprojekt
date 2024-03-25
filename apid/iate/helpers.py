@@ -20,9 +20,9 @@ def print_single_search_results(query, source_language, target_languages, option
 
                 entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'])
 
-                print_two_columns("ID:", str(entry['id']))
-                for domain in entry['domains']:
+                print_two_columns('IATE link:', 'https://iate.europa.eu/entry/result/' + str(entry['id']))
 
+                for domain in entry['domains']:
                     print_two_columns("Valdkond:", (" > ".join(get_domain_hierarchy_by_code(domains, domain['code']))))
 
                 print_two_columns("Loomise aeg:", entry['metadata']['creation']['timestamp'])
@@ -40,6 +40,9 @@ def print_single_search_results(query, source_language, target_languages, option
                         if 'definition_references' in lang_data:
                             for def_ref in lang_data['definition_references']:
                                 print_two_columns("Definitisiooni allikaviide:", def_ref['text'])
+
+                        if 'note' in lang_data:
+                            print_two_columns("Märkus:", lang_data['note']['value'])
 
                         if 'term_entries' in lang_data:
                             for term_entry in lang_data['term_entries']:

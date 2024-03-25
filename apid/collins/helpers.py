@@ -11,10 +11,12 @@ def print_search_results(results):
         for r in results['results']:
             print(r)
 
+
 def print_suggestions(results):
     if 'suggestions' in results:
         for s in results['suggestions']:
             print(s)
+
 
 def print_entry_data(results):
     if 'entryContent' in results:

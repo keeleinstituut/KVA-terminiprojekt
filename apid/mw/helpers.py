@@ -25,6 +25,7 @@ def json_to_df_with_definitions_and_usages(json_data):
     rows = []
 
     def clean_text(text):
+        import re  # Make sure to import the re module for regex operations
         text = text.replace('{bc}', '').replace('{wi}', '').replace('{/wi}', '').replace('{it}', '').replace('{/it}', '').replace('{parahw}', '').replace('{/parahw}', '')
         text = re.sub(r'\{sx\|[^}]*\|\|\}', '', text)
         text = text.strip()
@@ -73,9 +74,19 @@ def json_to_df_with_definitions_and_usages(json_data):
             usages.append(f"{pl_text} {' '.join(pt_texts)}")
         return '; '.join(usages)
     
+     
+
     for result_key, result_value in json_data.items():
+        if not isinstance(result_value, dict):
+            continue
+
+        headword = clean_text(result_value.get('hwi', {}).get('hw', ''))
+        if not headword:
+            return json_data
+
         row = {
-            'Headword': clean_text(result_value.get('hwi', {}).get('hw', '')),
+            'Source': 'Merriam-Webster',
+            'Headword': headword,
             'Homonym': result_value.get('hom', ''),
             'Functional Label': result_value.get('fl', ''),
             'Cross References': extract_cxs(result_value.get('cxs', [])),
@@ -85,4 +96,5 @@ def json_to_df_with_definitions_and_usages(json_data):
             'Usages': extract_usages(result_value.get('usages', []))
         }
         rows.append(row)
+
     return pd.DataFrame(rows)
