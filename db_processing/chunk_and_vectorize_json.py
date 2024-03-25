@@ -1,4 +1,5 @@
 # %%
+import argparse
 import json
 import os
 import sys
@@ -6,13 +7,13 @@ from typing import List
 
 import spacy
 from document_structure import (Chunk, ContentTextData, Document, FootnoteData,
-                             TableData, TermData)
+                                TableData, TermData)
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import (Distance, PointStruct,
-                                       VectorParams)
+from qdrant_client.http.models import Distance, PointStruct, VectorParams
 from sentence_transformers import SentenceTransformer
-import argparse
 from tqdm import tqdm
+from transformers import AutoTokenizer
+
 
 # %%
 class SpacySenter:
@@ -51,12 +52,39 @@ class WhitespaceTokenizer:
             char_counter += len(token) + 1
         return token_data
     
+class E5Tokenizer:
+
+    def __init__(self) -> None:
+        self.tokenizer = AutoTokenizer.from_pretrained('intfloat/multilingual-e5-large')
+
+    def get_tokens(self, text: str = '') -> List[dict]:
+
+
+        token_data = list()
+
+        encoded_input = self.tokenizer.encode_plus(text, return_offsets_mapping=True, add_special_tokens=False, verbose=False)
+
+        # The 'offset_mapping' contains the start and end positions of each token in the original text
+        offset_mapping = encoded_input['offset_mapping']
+
+        for token_index, (start_pos, end_pos) in enumerate(offset_mapping):
+            token_data.append({
+                'text': text[start_pos:end_pos],
+                'start_char': start_pos,
+                'end_char': end_pos,
+            })
+
+        return token_data
+
+    
 
 def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk], last_idx: int, model):
     section_points = list()
 
     for i, chunk in enumerate(section_chunks, 1):    
         try:
+            if not chunk.get_text():
+                continue
             chunk_text = 'passage:' + chunk.get_text()
         except TypeError:
             print(chunk)
@@ -120,7 +148,7 @@ if __name__ == '__main__':
             vectors_config=VectorParams(size=embedding_size, distance=Distance.COSINE),
         )
 
-    tokenizer = WhitespaceTokenizer()
+    tokenizer = E5Tokenizer()
     senter = SpacySenter()
 
     fpath = args.arg2
