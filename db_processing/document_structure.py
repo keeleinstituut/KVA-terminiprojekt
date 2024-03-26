@@ -123,7 +123,7 @@ class ContentTextData(DataField):
             if last_page != page_number - 1:
                 continuous_texts.append(page_text)
                 continuous_text_page_spans.append({
-                    page_number: (0, page_text_length)
+                    page_number: (0, page_text_length +1)
                 })
                 last_page = page_number
                 last_page_final_character_loc = page_text_length
