@@ -7,12 +7,14 @@ from typing import List
 
 import spacy
 from document_structure import (Chunk, ContentTextData, Document, FootnoteData,
-                                TableData, TermData)
+                                TableData, TermData, divide_chunks)
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, PointStruct, VectorParams
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from transformers import AutoTokenizer
+import logging
+import math
 
 
 # %%
@@ -23,13 +25,25 @@ class SpacySenter:
 
     def get_sentences(self, text: str = '') -> List[dict]:
         sentence_data = list()
-        for sent in self.nlp(text).sents:
-            sentence_data.append({
-                'text': sent.text,
-                'start_char': sent.start_char,
-                'end_char': sent.end_char,
-                'length_token': len(sent)
-            })
+
+        # Spacy jaoks liigade pikkade tekstide jaotamine
+        if len(text) >= 1000000:
+            new_block_size = round(len(text) / math.ceil(
+                        len(text) / 1000000))  # for more equal chunks
+            text_blocks =  divide_chunks(text, new_block_size)
+        else:
+            text_blocks = [text]
+
+        # lausestamine
+        for block in text_blocks:
+            sents = self.nlp(block).sents
+            for sent in sents:
+                sentence_data.append({
+                    'text': sent.text,
+                    'start_char': sent.start_char,
+                    'end_char': sent.end_char,
+                    'length_token': len(sent)
+                })
 
         return sentence_data
 
@@ -78,7 +92,7 @@ class E5Tokenizer:
 
     
 
-def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk], last_idx: int, model):
+def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk], last_idx: int,  model, passage_prompt: dict = {}):
     section_points = list()
 
     for i, chunk in enumerate(section_chunks, 1):    
@@ -94,7 +108,7 @@ def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk
         payload.update(chunk.get_data())
         section_points.append(
                 PointStruct(id = last_idx + i,
-                            vector=list(model.encode(chunk_text, normalize_embeddings=True).astype(float)),
+                            vector=list(model.encode(chunk_text, normalize_embeddings=True, prompt=passage_prompt).astype(float)),
                             payload=payload)
                             )
     return section_points
@@ -106,23 +120,44 @@ if __name__ == '__main__':
 
     parser.add_argument("arg1", type=str, help="Configuration file")
     parser.add_argument("arg2", type=str, help="Input JSON path")
+    parser.add_argument("arg3", type=str, help="Log directory")
 
     args = parser.parse_args()
+
     try:
         if not args.arg1 or not args.arg2:
             raise ValueError("Error: Missing an argument")
     except ValueError as e:
-        print(e, file=sys.stderr)
+        print(e)
         sys.exit(1)
 
     try:
         if not os.path.isfile(args.arg1):
+            print(args.arg1)
             raise ValueError("Error: config is not a valid file")
         elif not os.path.isfile(args.arg2):
-            raise ValueError("Error: JSON path is not valid")
+            raise ValueError(f"Error: JSON path '{args.arg2}' is not valid")
     except ValueError as e:
-        print(e, file=sys.stderr)
+        print(e)
         sys.exit(1)
+
+    
+    # Configure logging
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # Create a file handler
+    file_handler = logging.FileHandler(os.path.join(args.arg3, args.arg2.split('/')[-1].split('.')[0] + '.log'))
+    file_handler.setLevel(logging.DEBUG)
+
+    # Create a formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+    # Set the formatter for the file handler
+    file_handler.setFormatter(formatter)
+
+    # Add the file handler to the logger
+    logger.addHandler(file_handler)
 
     # Load the configuration
     with open(args.arg1, 'r') as config_file:
@@ -136,24 +171,33 @@ if __name__ == '__main__':
     embedding_size = config['embedding_size']
     max_tokens = config['max_tokens']
     sentence_block_size = config['sentence_block_size']
+    passage_prompt = config['passage_prompt']
+    logger.info("Configuration loaded successfully")
 
     model = SentenceTransformer(embedding_model)
+    logger.info(f'Model {embedding_model} loaded.')
+
     client = QdrantClient(client_host, port=client_port)
+    logger.info(f'Connected to qdrant: {client_host}:{client_port}')
 
     existing_collections = [coll.name for coll in client.get_collections().collections]
 
     if collection_name not in existing_collections:
+        logger.info(f'Creating a new collection {collection_name} with embedding size {embedding_size}.')
         client.create_collection(
             collection_name=collection_name,
             vectors_config=VectorParams(size=embedding_size, distance=Distance.COSINE),
         )
 
+    logger.info('Initializing tokenizer and sentence parser.')
     tokenizer = E5Tokenizer()
     senter = SpacySenter()
+    logger.info('Tokenizer and parser initialized.')
 
     fpath = args.arg2
 
     collection_info = client.get_collection(collection_name)
+    logger.info(f'Loaded collection {collection_name}')
 
     with open(fpath, 'r') as fin:
 
@@ -182,6 +226,7 @@ if __name__ == '__main__':
             )
 
         document_metadata = document.get_metadata()
+        document_metadata['prompt'] = passage_prompt
 
         # parse content chunks one by one 
         content_chunks = document.content_text_data.to_chunks(sentensizer=senter, tokenizer=tokenizer, 
@@ -193,13 +238,14 @@ if __name__ == '__main__':
 
 
         # Chunks to PointStruct
-        for section_chunks in [content_chunks, term_chunks, footnote_chunks, table_chunks]:
+        for i, section_chunks in enumerate([content_chunks, term_chunks, footnote_chunks, table_chunks]):
+            logger.info(f'Logging section {i}')
             last_idx = client.get_collection(collection_name).vectors_count
             if not last_idx:
                 last_idx = 0
 
-            section_points = section_chunks_to_points(document_metadata, section_chunks, last_idx, model=model)
-            
+            section_points = section_chunks_to_points(document_metadata, section_chunks, last_idx, passage_prompt=passage_prompt, model=model)
+
             step = 100
             for i in tqdm(range(0, len(section_points), step)): 
                 x = i 
@@ -207,5 +253,6 @@ if __name__ == '__main__':
                     collection_name=collection_name,
                     wait=False,
                     points=section_points[x:x+step])
+            logger.info(f'{len(section_points)} chunks added to database')
 
 
