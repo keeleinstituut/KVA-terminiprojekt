@@ -31,7 +31,9 @@ def get_dictionaries(headers):
         return []
 
 
-def get_search_results(headers, dict_code, search_word, page_size, page_index):
+def get_search_results(dict_code, search_word, page_size, page_index):
+    headers = set_headers()
+
     url = f'https://api.collinsdictionary.com/api/v1/dictionaries/{dict_code}/search/?q={search_word}&pagesize={page_size}&pageindex={page_index}'
     try:
         response = requests.get(url, headers=headers)
@@ -60,7 +62,8 @@ def get_entries_urls(results):
     return urls
 
 
-def get_entry_by_entry_url(entry_url, headers):
+def get_entry_by_entry_url(entry_url):
+    headers = set_headers()
     entry_url = entry_url.replace('http', 'https')
     try:
         response = requests.get(entry_url, headers=headers)

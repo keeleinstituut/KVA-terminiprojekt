@@ -1,6 +1,7 @@
 from copy import deepcopy
 import pandas as pd
 import re
+from . import entries_requests
 
 
 def refine_results(original_results):
@@ -21,12 +22,15 @@ def refine_results(original_results):
     return refined_results
 
 
-def json_to_df_with_definitions_and_usages(json_data):
+def json_to_df_with_definitions_and_usages(query):
+    result = entries_requests.get_data(query, "collegiate")
+    refined_json = refine_results(result)
+
     rows = []
 
     def clean_text(text):
-        import re  # Make sure to import the re module for regex operations
-        text = text.replace('{bc}', '').replace('{wi}', '').replace('{/wi}', '').replace('{it}', '').replace('{/it}', '').replace('{parahw}', '').replace('{/parahw}', '')
+        import re
+        text = text.replace('{bc}', '').replace('{wi}', '').replace('{/wi}', '').replace('{it}', '').replace('{/it}', '').replace('{parahw}', '').replace('{/parahw}', '').replace('*', '')
         text = re.sub(r'\{sx\|[^}]*\|\|\}', '', text)
         text = text.strip()
         return text
@@ -76,24 +80,21 @@ def json_to_df_with_definitions_and_usages(json_data):
     
      
 
-    for result_key, result_value in json_data.items():
+    for result_key, result_value in refined_json.items():
         if not isinstance(result_value, dict):
             continue
 
         headword = clean_text(result_value.get('hwi', {}).get('hw', ''))
         if not headword:
-            return json_data
+            return refined_json
 
         row = {
-            'Source': 'Merriam-Webster',
-            'Headword': headword,
-            'Homonym': result_value.get('hom', ''),
-            'Functional Label': result_value.get('fl', ''),
-            'Cross References': extract_cxs(result_value.get('cxs', [])),
-            'Short Definitions': '; '.join(result_value.get('shortdef', [])),
-            'Long Definitions': extract_definitions(result_value.get('def', [])),
-            'Verbal Illustrations': extract_verbal_illustrations(result_value.get('def', [])),
-            'Usages': extract_usages(result_value.get('usages', []))
+            'Allikas': 'M-W',
+            'Keelend': headword,
+            'Definitsioon': extract_definitions(result_value.get('def', [])),
+            'Lühike definitsioon': '; '.join(result_value.get('shortdef', [])),
+            'Näide': extract_verbal_illustrations(result_value.get('def', [])),
+            'Kasutus': extract_usages(result_value.get('usages', []))
         }
         rows.append(row)
 

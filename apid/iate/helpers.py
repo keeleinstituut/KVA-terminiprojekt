@@ -1,7 +1,9 @@
+import re
 from . import authentication_requests
 from . import catalogue_requests
 from . import entries_requests
 import json
+import pandas as pd
 
 
 def print_single_search_results(query, source_language, target_languages, optional_parameters):
@@ -234,3 +236,86 @@ def print_two_columns(label, text, width=40):
             first_line = False
         else:
             print(f"{' '.ljust(width)}{line}")
+
+
+def format_usage_examples(usages):
+    value_for_df = ''
+    for u in usages:
+        cleaned_ref = re.sub(r'<a href="[^"]*" target="_blank">|</a>', '', u['reference']['text'])
+        cleaned_ref = re.sub(r'<time datetime.*\">', '', cleaned_ref)
+        cleaned_ref = cleaned_ref.replace('</time>', '')
+
+        value_for_df += u['context'] + ' (' + cleaned_ref + '); '
+    
+    value_for_df = value_for_df.strip('; ').replace('<b>', '').replace('</b>', '').replace('&gt;', '>').replace('<br>', '').replace('<div>', '').replace('</div>', '')
+
+
+    return value_for_df
+
+def format_definition(definition):
+    cleaned_def = re.sub(r'<a href="[^"]*" target="_blank">|</a>', '', definition)
+    cleaned_def = re.sub(r'<time datetime="[^"]*">|</time>', '', cleaned_def)
+
+    return cleaned_def
+
+
+def search_results_to_dataframe(query, source_language, target_languages, optional_parameters):
+    results_list = []
+
+    tokens = authentication_requests.get_iate_tokens()
+    access_token = tokens['tokens'][0]['access_token']
+    result = entries_requests.perform_single_search(access_token, query, source_language, target_languages, **optional_parameters)
+    domains = catalogue_requests.get_domains(access_token)
+
+    if result and 'items' in result:
+        for item in result['items']:
+            entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'])
+            print('entry:')
+            print(entry)
+            
+            domain_hierarchy = []
+            for domain in entry['domains']:
+                domain_hierarchy.append(" > ".join(get_domain_hierarchy_by_code(domains, domain['code'])))
+            domain_hierarchy_str = "; ".join(domain_hierarchy)
+
+            for tl in target_languages:
+                if tl in entry['language']:
+                    lang_data = entry['language'][tl]
+                    term_entries = lang_data.get('term_entries', [])
+                    for term_entry in term_entries:
+                        creation_time = entry['metadata']['creation']['timestamp'].split('T')[0]
+                        modification_time = entry['metadata']['modification']['timestamp'].split('T')[0]
+
+                        entry_data = {
+                            'IATE link': 'https://iate.europa.eu/entry/result/' + str(entry['id']),
+                            'Lisatud': creation_time,
+                            'Muudetud': modification_time,
+                            #'Status': str(entry['metadata']['status']),
+                            'Valdkond': domain_hierarchy_str,
+                            'Keel': tl.upper(),
+                            'Termin': term_entry['term_value'],
+                            'Definitsioon': format_definition(lang_data.get('definition', '')),
+                            'Märkus': lang_data['note']['value'] if 'note' in lang_data else '',
+                            'Kasutusnäide': format_usage_examples(term_entry.get('contexts', []))
+                            }
+
+                        results_list.append(entry_data)
+                else:
+                    creation_time = entry['metadata']['creation']['timestamp'].split('T')[0]
+                    modification_time = entry['metadata']['modification']['timestamp'].split('T')[0]
+                    
+                    entry_data = {
+                        'IATE link': 'https://iate.europa.eu/entry/result/' + str(entry['id']),
+                        'Lisatud': creation_time,
+                        'Muudetud': modification_time,
+                        #'Status': str(entry['metadata']['status']),
+                        'Valdkond': domain_hierarchy_str,
+                        'Keel': tl.upper(),
+                        'Termin': '',
+                        'Definitsioon': '',
+                        'Märkus': '',
+                        'Kasutusnäide': ''
+                    }
+                    results_list.append(entry_data)
+
+    return pd.DataFrame(results_list)

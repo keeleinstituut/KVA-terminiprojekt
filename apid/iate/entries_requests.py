@@ -3,6 +3,7 @@ import json
 
 
 def perform_single_search(access_token, query, source, targets, **kwargs):
+    print('perform_single_search')
     """
     Perform a single search request to the IATE API.
 
