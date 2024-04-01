@@ -89,12 +89,11 @@ def json_to_df_with_definitions_and_usages(query):
             return refined_json
 
         row = {
-            'Allikas': 'M-W',
+            'Allikas': 'Merriam-Webster',
             'Keelend': headword,
             'Definitsioon': extract_definitions(result_value.get('def', [])),
             'Lühike definitsioon': '; '.join(result_value.get('shortdef', [])),
-            'Näide': extract_verbal_illustrations(result_value.get('def', [])),
-            'Kasutus': extract_usages(result_value.get('usages', []))
+            'Näide': extract_verbal_illustrations(result_value.get('def', []))
         }
         rows.append(row)
 

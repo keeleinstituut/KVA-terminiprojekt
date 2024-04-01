@@ -1,11 +1,11 @@
 import pandas as pd
 
 
-def dataframes_to_excel(df1, df2, df3, path):
+def dataframes_to_excel(df1, df2, df3, df4, df5, path):
     with pd.ExcelWriter(path, engine='xlsxwriter') as writer:
         df1.to_excel(writer, sheet_name='IATE', index=False)
-        df2_3_combined = pd.concat([df2, df3], ignore_index=True)
-        df2_3_combined.to_excel(writer, sheet_name='Sõnaraamatud', index=False)
+        df2_3_4_5_combined = pd.concat([df2, df3, df4, df5], ignore_index=True)
+        df2_3_4_5_combined.to_excel(writer, sheet_name='Sõnaraamatud', index=False)
 
         workbook = writer.book
         wrap_format = workbook.add_format({'text_wrap': True})
@@ -32,7 +32,8 @@ def dataframes_to_excel(df1, df2, df3, path):
                 worksheet.write_url(row_num, 0, current_link, link_format)
 
         worksheet = writer.sheets['Sõnaraamatud']
-        worksheet.set_column('A:A', 10, wrap_format)
+        worksheet.set_column('A:A', 35, wrap_format)
+        worksheet.set_column('B:B', 15, wrap_format)
         worksheet.freeze_panes(1, 0)
-        if len(df2_3_combined.columns) > 1:
+        if len(df2_3_4_5_combined.columns) > 1:
             worksheet.set_column('B:F', 40, wrap_format)

@@ -252,11 +252,15 @@ def format_usage_examples(usages):
 
     return value_for_df
 
-def format_definition(definition):
-    cleaned_def = re.sub(r'<a href="[^"]*" target="_blank">|</a>', '', definition)
-    cleaned_def = re.sub(r'<time datetime="[^"]*">|</time>', '', cleaned_def)
+def format_definition_or_note(definition_or_note):
+    cleaned_def_or_note = re.sub(r'<a href="[^"]*" target="_blank">|</a>', '', definition_or_note)
+    cleaned_def_or_note = re.sub(r'<time datetime="[^"]*">|</time>', '', cleaned_def_or_note)
+    cleaned_def_or_note = cleaned_def_or_note.replace('<br>', '').replace('<p>', '').replace('</p>', '')
 
-    return cleaned_def
+    if '"ENTRY_TO_ENTRY_CONVERTER"' in cleaned_def_or_note:
+        cleaned_def_or_note = re.sub(r'\[ <a href="([^"]+)"[^>]*>IATE:(\d+) \]', r'[https://iate.europa.eu/entry/result/\2/all]', cleaned_def_or_note)
+
+    return cleaned_def_or_note
 
 
 def search_results_to_dataframe(query, source_language, target_languages, optional_parameters):
@@ -270,8 +274,6 @@ def search_results_to_dataframe(query, source_language, target_languages, option
     if result and 'items' in result:
         for item in result['items']:
             entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'])
-            print('entry:')
-            print(entry)
             
             domain_hierarchy = []
             for domain in entry['domains']:
@@ -294,8 +296,8 @@ def search_results_to_dataframe(query, source_language, target_languages, option
                             'Valdkond': domain_hierarchy_str,
                             'Keel': tl.upper(),
                             'Termin': term_entry['term_value'],
-                            'Definitsioon': format_definition(lang_data.get('definition', '')),
-                            'Märkus': lang_data['note']['value'] if 'note' in lang_data else '',
+                            'Definitsioon': format_definition_or_note(lang_data.get('definition', '')),
+                            'Märkus': format_definition_or_note(lang_data['note']['value']) if 'note' in lang_data else '',
                             'Kasutusnäide': format_usage_examples(term_entry.get('contexts', []))
                             }
 
