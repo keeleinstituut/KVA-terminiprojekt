@@ -1,6 +1,5 @@
 from copy import deepcopy
 import pandas as pd
-import re
 from . import entries_requests
 
 
@@ -35,14 +34,6 @@ def json_to_df_with_definitions_and_usages(query):
         text = text.strip()
         return text
 
-    def extract_cxs(cxs_list):
-        cxs_text = []
-        for cxs_item in cxs_list:
-            cxs_label = cxs_item.get('cxl', '')
-            cxtis_text = ', '.join([clean_text(cxti.get('cxt', '')) for cxti in cxs_item.get('cxtis', [])])
-            cxs_text.append(f"{cxs_label} {cxtis_text}")
-        return '; '.join(cxs_text)
-
     def extract_definitions(def_list):
         definitions = []
         for definition in def_list:
@@ -69,16 +60,6 @@ def json_to_df_with_definitions_and_usages(query):
                                         cleaned_vis = clean_text(vis_item['t'])
                                         verbal_illustrations.append(cleaned_vis)
         return '; '.join(verbal_illustrations)
-
-    def extract_usages(usages_list):
-        usages = []
-        for usage in usages_list:
-            pl_text = clean_text(usage.get('pl', ''))
-            pt_texts = [clean_text(pt_item[1]) for pt_item in usage.get('pt', []) if pt_item[0] == 'text']
-            usages.append(f"{pl_text} {' '.join(pt_texts)}")
-        return '; '.join(usages)
-    
-     
 
     for result_key, result_value in refined_json.items():
         if not isinstance(result_value, dict):

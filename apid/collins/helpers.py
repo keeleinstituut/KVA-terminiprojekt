@@ -40,6 +40,19 @@ def map_dict_names(code):
 
     return dicts[code]
 
+
+def get_all_text(element):
+    text = ''
+    if element.text:
+        text += element.text
+    for child in element:
+        text += get_all_text(child)
+    if element.tail:
+        text += element.tail
+    return text
+
+
+# Collins English Dictionary
 def entry_data_to_dataframe(dict_code, search_word, page_size, page_index):
     search_results = entries_requests.get_search_results(dict_code, search_word, page_size, page_index)
 
@@ -69,18 +82,8 @@ def entry_data_to_dataframe(dict_code, search_word, page_size, page_index):
     return df
 
 
-
-def get_all_text(element):
-    """Recursively get all text from an XML element and its children."""
-    text = ''
-    if element.text:
-        text += element.text
-    for child in element:
-        text += get_all_text(child)
-    if element.tail:
-        text += element.tail
-    return text
-
+# Collins Cobuild Advanced British
+# Collins Cobuild Advanced American
 def entry_cobuild_data_to_dataframe(dict_code, search_word, page_size, page_index):
     search_results = entries_requests.get_search_results(dict_code, search_word, page_size, page_index)
     data = []
@@ -91,12 +94,12 @@ def entry_cobuild_data_to_dataframe(dict_code, search_word, page_size, page_inde
             result_data = entries_requests.get_entry_by_entry_url(url)
             if 'entryContent' in result_data:
                 root = ET.fromstring(result_data['entryContent'])
-                headword = root.find('.//orth').text if root.find('.//orth') is not None else 'N/A'
+                headword = root.find('.//orth').text if root.find('.//orth') is not None else ''
 
                 for entry in root.findall('.//hom'):
                     definitions = entry.findall('.//def')
                     for definition in definitions:
-                        definition_text = get_all_text(definition).strip() if definition is not None else 'N/A'
+                        definition_text = get_all_text(definition).strip() if definition is not None else ''
                         examples = entry.findall('.//cit[@type="example"]/quote')
                         example_texts = [get_all_text(example).strip() for example in examples if example is not None]
 
