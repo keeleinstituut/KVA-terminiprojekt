@@ -7,4 +7,4 @@ apid/mw/__pycache__
 apid/collins/__pycache__
 apid/iate/__pycache__
 apid/.env
-apid/search_results.csv
+apid/*.xlsx

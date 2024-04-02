@@ -44,7 +44,9 @@ def get_search_results(dict_code, search_word, page_size, page_index):
         return {}
 
 
-def get_first_matching_entry(headers, dict_code, search_word):
+def get_first_matching_entry(dict_code, search_word):
+    headers = set_headers()
+
     url = f'https://api.collinsdictionary.com/api/v1/dictionaries/{dict_code}/search/first?q={search_word}&format=xml'
     try:
         response = requests.get(url, headers=headers)
@@ -74,7 +76,9 @@ def get_entry_by_entry_url(entry_url):
         return None
     
 
-def get_did_you_mean(headers, dict_code, search_word, entry_number):
+def get_did_you_mean(dict_code, search_word, entry_number):
+    headers = set_headers()
+
     url = f'https://api.collinsdictionary.com/api/v1/dictionaries/{dict_code}/search/didyoumean?q={search_word}&entrynumber={entry_number}'
     try:
         response = requests.get(url, headers=headers)

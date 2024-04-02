@@ -9,9 +9,10 @@ def dataframes_to_excel(df1, df2, df3, df4, df5, path):
 
         workbook = writer.book
         wrap_format = workbook.add_format({'text_wrap': True})
-        border_format = workbook.add_format({'bottom': 2})
+        border_wrap_format = workbook.add_format({'bottom': 2, 'text_wrap': True})
         link_format = workbook.add_format({'font_color': 'blue', 'underline': 1, 'bottom': 2})
 
+        # IATE tulemused
         worksheet = writer.sheets['IATE']
         worksheet.set_column('A:A', 45, wrap_format)
         worksheet.freeze_panes(1, 0)
@@ -20,17 +21,22 @@ def dataframes_to_excel(df1, df2, df3, df4, df5, path):
             worksheet.set_column('D:D', 30, wrap_format)
             worksheet.set_column('E:E', 10, wrap_format)
             worksheet.set_column('F:F', 30, wrap_format)
-            worksheet.set_column('G:I', 40, wrap_format)
+            worksheet.set_column('G:M', 40, wrap_format)
 
-        for row_num in range(1, len(df1)):
+        # Joon vahele, et eristada erinevaid mõisteid IATE lingi URLi järgi
+        for row_num in range(1, len(df1) + 1):
             current_link = df1.iloc[row_num - 1]['IATE link']
             next_link = df1.iloc[row_num]['IATE link'] if row_num < len(df1) - 1 else None
 
             if next_link and current_link != next_link:
-                worksheet.set_row(row_num, None, border_format)
-
+                worksheet.set_row(row_num, None, border_wrap_format)
                 worksheet.write_url(row_num, 0, current_link, link_format)
+            else:
+                # For the last row with a unique link, you need to apply link_format explicitly
+                if row_num == len(df1) or (next_link and current_link != next_link):
+                    worksheet.write_url(row_num, 0, current_link, link_format)
 
+        # Sõnaraamatute tulemused
         worksheet = writer.sheets['Sõnaraamatud']
         worksheet.set_column('A:A', 35, wrap_format)
         worksheet.set_column('B:B', 15, wrap_format)

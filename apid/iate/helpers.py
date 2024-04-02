@@ -98,7 +98,6 @@ def print_query_operators():
     result = catalogue_requests.get_query_operators(access_token)
 
     if result:
-        #print(json.dumps(result, indent=4))
         if 'items' in result:
             for item in result['items']:
                 href = item['meta']['href']
@@ -118,7 +117,6 @@ def print_searchable_fields():
     result = catalogue_requests.get_searchable_fields(access_token)
 
     if result:
-        #print(json.dumps(result, indent=4))
         if 'items' in result:
             for item in result['items']:
                 href = item['meta']['href']
@@ -240,6 +238,8 @@ def print_two_columns(label, text, width=40):
 
 def format_usage_examples(usages):
     value_for_df = ''
+    cleaned_ref = ''
+
     for u in usages:
         cleaned_ref = re.sub(r'<a href="[^"]*" target="_blank">|</a>', '', u['reference']['text'])
         cleaned_ref = re.sub(r'<time datetime.*\">', '', cleaned_ref)
@@ -249,18 +249,24 @@ def format_usage_examples(usages):
     
     value_for_df = value_for_df.strip('; ').replace('<b>', '').replace('</b>', '').replace('&gt;', '>').replace('<br>', '').replace('<div>', '').replace('</div>', '')
 
-
-    return value_for_df
+    return value_for_df, cleaned_ref
 
 def format_definition_or_note(definition_or_note):
     cleaned_def_or_note = re.sub(r'<a href="[^"]*" target="_blank">|</a>', '', definition_or_note)
     cleaned_def_or_note = re.sub(r'<time datetime="[^"]*">|</time>', '', cleaned_def_or_note)
-    cleaned_def_or_note = cleaned_def_or_note.replace('<br>', '').replace('<p>', '').replace('</p>', '')
+    cleaned_def_or_note = cleaned_def_or_note.replace('<br>', '').replace('<p>', '').replace('</p>', '').replace('<i>', '').replace('</i>', '')
 
     if '"ENTRY_TO_ENTRY_CONVERTER"' in cleaned_def_or_note:
         cleaned_def_or_note = re.sub(r'\[ <a href="([^"]+)"[^>]*>IATE:(\d+) \]', r'[https://iate.europa.eu/entry/result/\2/all]', cleaned_def_or_note)
 
     return cleaned_def_or_note
+
+
+def clean_term_source(term_source):
+    cleaned_ref = term_source['text'].replace('<a href="', '').replace('" target="_blank">', ' - ')
+    cleaned_ref = re.sub(r'<.*>', '', cleaned_ref)
+    
+    return cleaned_ref
 
 
 def search_results_to_dataframe(query, source_language, target_languages, optional_parameters):
@@ -274,7 +280,6 @@ def search_results_to_dataframe(query, source_language, target_languages, option
     if result and 'items' in result:
         for item in result['items']:
             entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'])
-            
             domain_hierarchy = []
             for domain in entry['domains']:
                 domain_hierarchy.append(" > ".join(get_domain_hierarchy_by_code(domains, domain['code'])))
@@ -288,6 +293,18 @@ def search_results_to_dataframe(query, source_language, target_languages, option
                         creation_time = entry['metadata']['creation']['timestamp'].split('T')[0]
                         modification_time = entry['metadata']['modification']['timestamp'].split('T')[0]
 
+                        value_for_df, cleaned_ref = format_usage_examples(term_entry.get('contexts', []))
+
+                        term_refs = ''
+                        if 'term_references' in term_entry:
+                            cleaned_refs = [clean_term_source(item) for item in term_entry['term_references']]
+                            term_refs = '; '.join(cleaned_refs).strip('; ')
+                        
+                        def_refs = ''
+                        if 'definition_references' in lang_data:
+                            cleaned_refs = [clean_term_source(item) for item in lang_data['definition_references']]
+                            def_refs = '; '.join(cleaned_refs).strip('; ')
+
                         entry_data = {
                             'IATE link': 'https://iate.europa.eu/entry/result/' + str(entry['id']),
                             'Lisatud': creation_time,
@@ -296,9 +313,12 @@ def search_results_to_dataframe(query, source_language, target_languages, option
                             'Valdkond': domain_hierarchy_str,
                             'Keel': tl.upper(),
                             'Termin': term_entry['term_value'],
+                            'Termini allikaviide': term_refs,
                             'Definitsioon': format_definition_or_note(lang_data.get('definition', '')),
+                            'Definitsiooni allikaviited': def_refs,
                             'Märkus': format_definition_or_note(lang_data['note']['value']) if 'note' in lang_data else '',
-                            'Kasutusnäide': format_usage_examples(term_entry.get('contexts', []))
+                            'Kasutusnäide': value_for_df,
+                            'Kasutusnäite allikaviide': cleaned_ref
                             }
 
                         results_list.append(entry_data)
@@ -314,9 +334,12 @@ def search_results_to_dataframe(query, source_language, target_languages, option
                         'Valdkond': domain_hierarchy_str,
                         'Keel': tl.upper(),
                         'Termin': '',
+                        'Termini allikaviide': '',
                         'Definitsioon': '',
+                        'Definitsiooni allikaviited': '',
                         'Märkus': '',
-                        'Kasutusnäide': ''
+                        'Kasutusnäide': '',
+                        'Kasutusnäite allikaviide': ''
                     }
                     results_list.append(entry_data)
 
