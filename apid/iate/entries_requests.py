@@ -2,14 +2,15 @@ import requests
 import json
 
 
-def perform_single_search(access_token, query, source, targets, **kwargs):
+def perform_single_search(access_token, query, source, targets, session=None, **kwargs):
     """
-    Perform a single search request to the IATE API.
+    Perform a single search request to the IATE API using an optional requests session.
 
     :param access_token: The Bearer token for authorization.
     :param query: The query string to search for.
     :param source: The source language of the terminology data.
     :param targets: A list of target languages for the terminology data.
+    :param session: An optional session object for making requests.
     :param kwargs: Additional optional parameters (expand, 
                                                     offset, 
                                                     limit, 
@@ -45,7 +46,10 @@ def perform_single_search(access_token, query, source, targets, **kwargs):
         'Authorization': f'Bearer {access_token}'
     }
 
-    response = requests.post(url, headers=headers, data=json_payload)
+    if session:
+        response = session.post(url, headers=headers, data=json_payload)
+    else:
+        response = requests.post(url, headers=headers, data=json_payload)
 
     if response.status_code == 200:
         return response.json()

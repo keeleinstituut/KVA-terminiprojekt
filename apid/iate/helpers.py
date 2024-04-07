@@ -1,77 +1,9 @@
+import requests
 import re
 from . import authentication_requests
 from . import catalogue_requests
 from . import entries_requests
-import json
 import pandas as pd
-
-
-def print_single_search_results(query, source_language, target_languages, optional_parameters):
-
-    tokens = authentication_requests.get_iate_tokens()
-
-    access_token = tokens['tokens'][0]['access_token']
-
-    result = entries_requests.perform_single_search(access_token, query, source_language, target_languages, **optional_parameters)
-
-    domains = catalogue_requests.get_domains(access_token)
-    
-    if result:
-        if 'items' in result:
-            for item in result['items']:
-
-                entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'])
-
-                print_two_columns('IATE link:', 'https://iate.europa.eu/entry/result/' + str(entry['id']))
-
-                for domain in entry['domains']:
-                    print_two_columns("Valdkond:", (" > ".join(get_domain_hierarchy_by_code(domains, domain['code']))))
-
-                print_two_columns("Loomise aeg:", entry['metadata']['creation']['timestamp'])
-                print_two_columns("Muutmise aeg:", entry['metadata']['modification']['timestamp'])
-                print_two_columns("Olek:", str(entry['metadata']['status']))
-                print("\n")
-
-                for tl in target_languages:
-                    if tl in entry['language']:
-                        lang_data = entry['language'][tl]
-                        print(f"{tl.upper()}:")
-                        if 'definition' in lang_data:
-                            print_two_columns("Definitsioon:", lang_data['definition'])
-
-                        if 'definition_references' in lang_data:
-                            for def_ref in lang_data['definition_references']:
-                                print_two_columns("Definitisiooni allikaviide:", def_ref['text'])
-
-                        if 'note' in lang_data:
-                            print_two_columns("Märkus:", lang_data['note']['value'])
-
-                        if 'term_entries' in lang_data:
-                            for term_entry in lang_data['term_entries']:
-                                print("\n")
-                                print_two_columns("Termin:", term_entry['term_value'])
-
-                                if 'term_references' in term_entry:
-                                    for term_reference in term_entry['term_references']:
-                                        print_two_columns("Termini allikaviide:", term_reference['text'])
-
-                                
-                                if 'contexts' in term_entry:
-                                    for context in term_entry['contexts']:
-                                        print_two_columns("Termini kasutusnäide:", context['context'])
-                                        if 'reference' in context:
-                                            print_two_columns("Termini kasutusnäite allikaviide:", context['reference']['text'])
-      
-                    else:
-                        print_two_columns(f"Selles keeles tulemusi pole:", tl)
-                    print('\n')
-                print('----------------------------------------')
-
-        else:
-            print('Tulemusi pole.')
-    else:
-        print('Tulemusi pole.')
-
 
 
 def print_languages():
@@ -225,17 +157,6 @@ def create_reliabilites_list():
     return reliabilites_list
 
 
-def print_two_columns(label, text, width=40):
-    lines = text.split('\n')
-    first_line = True
-    for line in lines:
-        if first_line:
-            print(f"{label.ljust(width)}{line}")
-            first_line = False
-        else:
-            print(f"{' '.ljust(width)}{line}")
-
-
 def format_usage_examples(usages):
     value_for_df = ''
     cleaned_ref = ''
@@ -250,6 +171,7 @@ def format_usage_examples(usages):
     value_for_df = value_for_df.strip('; ').replace('<b>', '').replace('</b>', '').replace('&gt;', '>').replace('<br>', '').replace('<div>', '').replace('</div>', '')
 
     return value_for_df, cleaned_ref
+
 
 def format_definition_or_note(definition_or_note):
     cleaned_def_or_note = re.sub(r'<a href="[^"]*" target="_blank">|</a>', '', definition_or_note)
@@ -270,77 +192,75 @@ def clean_term_source(term_source):
 
 
 def search_results_to_dataframe(query, source_language, target_languages, optional_parameters):
-    results_list = []
+    with requests.Session() as session:
+        tokens = authentication_requests.get_iate_tokens(session=session)
+        access_token = tokens['tokens'][0]['access_token']
+        results_list = []
 
-    tokens = authentication_requests.get_iate_tokens()
-    access_token = tokens['tokens'][0]['access_token']
-    result = entries_requests.perform_single_search(access_token, query, source_language, target_languages, **optional_parameters)
-    domains = catalogue_requests.get_domains(access_token)
+        result = entries_requests.perform_single_search(access_token, query, source_language, target_languages, session=session, **optional_parameters)
+        domains = catalogue_requests.get_domains(access_token, session=session)
+        if result and 'items' in result:
+            for item in result['items']:
+                entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'], session=session)
+                domain_hierarchy = []
+                for domain in entry['domains']:
+                    domain_hierarchy.append(" > ".join(get_domain_hierarchy_by_code(domains, domain['code'])))
+                domain_hierarchy_str = "; ".join(domain_hierarchy)
 
-    if result and 'items' in result:
-        for item in result['items']:
-            entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'])
-            domain_hierarchy = []
-            for domain in entry['domains']:
-                domain_hierarchy.append(" > ".join(get_domain_hierarchy_by_code(domains, domain['code'])))
-            domain_hierarchy_str = "; ".join(domain_hierarchy)
+                for tl in target_languages:
+                    if tl in entry['language']:
+                        lang_data = entry['language'][tl]
+                        term_entries = lang_data.get('term_entries', [])
+                        for term_entry in term_entries:
+                            creation_time = entry['metadata']['creation']['timestamp'].split('T')[0]
+                            modification_time = entry['metadata']['modification']['timestamp'].split('T')[0]
 
-            for tl in target_languages:
-                if tl in entry['language']:
-                    lang_data = entry['language'][tl]
-                    term_entries = lang_data.get('term_entries', [])
-                    for term_entry in term_entries:
+                            value_for_df, cleaned_ref = format_usage_examples(term_entry.get('contexts', []))
+
+                            term_refs = ''
+                            if 'term_references' in term_entry:
+                                cleaned_refs = [clean_term_source(item) for item in term_entry['term_references']]
+                                term_refs = '; '.join(cleaned_refs).strip('; ')
+                            
+                            def_refs = ''
+                            if 'definition_references' in lang_data:
+                                cleaned_refs = [clean_term_source(item) for item in lang_data['definition_references']]
+                                def_refs = '; '.join(cleaned_refs).strip('; ')
+
+                            entry_data = {
+                                'IATE link': 'https://iate.europa.eu/entry/result/' + str(entry['id']),
+                                'Lisatud': creation_time,
+                                'Muudetud': modification_time,
+                                'Valdkond': domain_hierarchy_str,
+                                'Keel': tl.upper(),
+                                'Termin': term_entry['term_value'],
+                                'Termini allikaviide': term_refs,
+                                'Definitsioon': format_definition_or_note(lang_data.get('definition', '')),
+                                'Definitsiooni allikaviited': def_refs,
+                                'Märkus': format_definition_or_note(lang_data['note']['value']) if 'note' in lang_data else '',
+                                'Kasutusnäide': value_for_df,
+                                'Kasutusnäite allikaviide': cleaned_ref
+                                }
+
+                            results_list.append(entry_data)
+                    else:
                         creation_time = entry['metadata']['creation']['timestamp'].split('T')[0]
                         modification_time = entry['metadata']['modification']['timestamp'].split('T')[0]
-
-                        value_for_df, cleaned_ref = format_usage_examples(term_entry.get('contexts', []))
-
-                        term_refs = ''
-                        if 'term_references' in term_entry:
-                            cleaned_refs = [clean_term_source(item) for item in term_entry['term_references']]
-                            term_refs = '; '.join(cleaned_refs).strip('; ')
                         
-                        def_refs = ''
-                        if 'definition_references' in lang_data:
-                            cleaned_refs = [clean_term_source(item) for item in lang_data['definition_references']]
-                            def_refs = '; '.join(cleaned_refs).strip('; ')
-
                         entry_data = {
                             'IATE link': 'https://iate.europa.eu/entry/result/' + str(entry['id']),
                             'Lisatud': creation_time,
                             'Muudetud': modification_time,
-                            #'Status': str(entry['metadata']['status']),
                             'Valdkond': domain_hierarchy_str,
                             'Keel': tl.upper(),
-                            'Termin': term_entry['term_value'],
-                            'Termini allikaviide': term_refs,
-                            'Definitsioon': format_definition_or_note(lang_data.get('definition', '')),
-                            'Definitsiooni allikaviited': def_refs,
-                            'Märkus': format_definition_or_note(lang_data['note']['value']) if 'note' in lang_data else '',
-                            'Kasutusnäide': value_for_df,
-                            'Kasutusnäite allikaviide': cleaned_ref
-                            }
-
+                            'Termin': '',
+                            'Termini allikaviide': '',
+                            'Definitsioon': '',
+                            'Definitsiooni allikaviited': '',
+                            'Märkus': '',
+                            'Kasutusnäide': '',
+                            'Kasutusnäite allikaviide': ''
+                        }
                         results_list.append(entry_data)
-                else:
-                    creation_time = entry['metadata']['creation']['timestamp'].split('T')[0]
-                    modification_time = entry['metadata']['modification']['timestamp'].split('T')[0]
-                    
-                    entry_data = {
-                        'IATE link': 'https://iate.europa.eu/entry/result/' + str(entry['id']),
-                        'Lisatud': creation_time,
-                        'Muudetud': modification_time,
-                        #'Status': str(entry['metadata']['status']),
-                        'Valdkond': domain_hierarchy_str,
-                        'Keel': tl.upper(),
-                        'Termin': '',
-                        'Termini allikaviide': '',
-                        'Definitsioon': '',
-                        'Definitsiooni allikaviited': '',
-                        'Märkus': '',
-                        'Kasutusnäide': '',
-                        'Kasutusnäite allikaviide': ''
-                    }
-                    results_list.append(entry_data)
 
-    return pd.DataFrame(results_list)
+        return pd.DataFrame(results_list)

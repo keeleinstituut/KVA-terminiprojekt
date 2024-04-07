@@ -7,8 +7,7 @@ import os
 load_dotenv()
 
 
-def get_iate_tokens():
-    """Request and return IATE tokens using environment variables for credentials."""
+def get_iate_tokens(session=None):
 
     IATE_USERNAME = os.getenv('IATE_USERNAME')
     IATE_PASSWORD = os.getenv('IATE_PASSWORD')
@@ -28,7 +27,10 @@ def get_iate_tokens():
         'Content-Type': 'application/x-www-form-urlencoded'
     }
 
-    response = requests.post(full_url, headers=headers)
+    if session:
+        response = session.post(full_url, headers=headers)
+    else:
+        response = requests.post(full_url, headers=headers)
 
     if response.status_code == 200:
         return response.json()
@@ -37,7 +39,6 @@ def get_iate_tokens():
 
 
 def refresh_iate_tokens(refresh_token):
-    """Refresh IATE tokens using the provided refresh token."""
 
     base_url = "https://iate.europa.eu/uac-api/oauth2/token"
 

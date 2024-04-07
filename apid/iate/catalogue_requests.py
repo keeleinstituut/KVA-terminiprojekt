@@ -2,14 +2,17 @@ import requests
 import json
 
 
-def get_single_entity_by_href(access_token, href):
+def get_single_entity_by_href(access_token, href, session=None):
 
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Accept': 'application/json'
     }
 
-    response = requests.get(href, headers=headers)
+    if session:
+        response = session.get(href, headers=headers)
+    else:
+        response = requests.get(href, headers=headers)
 
     if response.status_code == 200:
         return response.json()
@@ -42,13 +45,18 @@ def get_languages(access_token, expand=True, offset=None, limit=None, trans_lang
         return response.status_code
 
 
-def get_domains(access_token):
+def get_domains(access_token, session=None):
     headers = {
         'Authorization': f'Bearer {access_token}',
         'Accept': 'application/json'
     }
 
-    response = requests.get('https://iate.europa.eu/em-api/domains/_tree', headers=headers)
+    url = 'https://iate.europa.eu/em-api/domains/_tree'
+
+    if session:
+        response = session.get(url, headers=headers)
+    else:
+        response = requests.get(url, headers=headers)
 
     if response.status_code == 200:
         return response.json()
