@@ -198,9 +198,11 @@ def process_entry(entry, domains, target_languages):
     domain_hierarchy_str = "; ".join(domain_hierarchy)
 
     for tl in target_languages:
+
         if tl in entry['language']:
             lang_data = entry['language'][tl]
             term_entries = lang_data.get('term_entries', [])
+
             for term_entry in term_entries:
                 creation_time = entry['metadata']['creation']['timestamp'].split('T')[0]
                 modification_time = entry['metadata']['modification']['timestamp'].split('T')[0]
@@ -217,6 +219,11 @@ def process_entry(entry, domains, target_languages):
                     cleaned_refs = [clean_term_source(item) for item in lang_data['definition_references']]
                     def_refs = '; '.join(cleaned_refs).strip('; ')
 
+                note_refs = ''
+                if 'note_references' in lang_data:
+                    cleaned_refs = [clean_term_source(item) for item in lang_data['note_references']]
+                    note_refs = '; '.join(cleaned_refs).strip('; ')
+
                 processed_entry = {
                     'IATE link': 'https://iate.europa.eu/entry/result/' + str(entry['id']),
                     'Lisatud': creation_time,
@@ -228,6 +235,7 @@ def process_entry(entry, domains, target_languages):
                     'Definitsioon': format_definition_or_note(lang_data.get('definition', '')),
                     'Definitsiooni allikaviited': def_refs,
                     'Märkus': format_definition_or_note(lang_data['note']['value']) if 'note' in lang_data else '',
+                    'Märkuse allikaviide': note_refs,
                     'Kasutusnäide': value_for_df,
                     'Kasutusnäite allikaviide': cleaned_ref
                     }
@@ -250,6 +258,6 @@ def search_results_to_dataframe(query, source_language, target_languages, option
             if 'self' in r:
                 entry = catalogue_requests.get_single_entity_by_href(access_token, r['self']['href'], session=session)
                 processed_entries = process_entry(entry, domains, target_languages)
-                results_list.extend(processed_entries)  # Extend list with all processed entries
+                results_list.extend(processed_entries)
 
         return pd.DataFrame(results_list)
