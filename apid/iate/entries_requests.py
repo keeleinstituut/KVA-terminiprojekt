@@ -28,33 +28,49 @@ def perform_single_search(access_token, query, source, targets, session=None, **
     """
     url = "https://iate.europa.eu/em-api/entries/_search"
 
-    default_kwargs = {'query_operator': 2}
-    
-    search_request = {
-        "query": query,
-        "source": source,
-        "targets": targets,
-        **default_kwargs, 
-        **kwargs           
-    }
-
-    json_payload = json.dumps(search_request)
-
     headers = {
         'Accept': 'application/vnd.iate.entry+json; version=2',
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {access_token}'
     }
 
-    if session:
-        response = session.post(url, headers=headers, data=json_payload)
-    else:
-        response = requests.post(url, headers=headers, data=json_payload)
+    limit = kwargs.pop('limit', 10)
+    offset = kwargs.pop('offset', 0)
 
-    if response.status_code == 200:
-        return response.json()
-    else:
-        return {'error': 'Failed to perform search', 'details': response.text}
+    all_results = []
+    
+    while True:
+        search_request = {
+            "query": query,
+            "source": source,
+            "targets": targets,
+            "offset": offset,
+            "limit": limit, 
+            **kwargs           
+        }
+
+        json_payload = json.dumps(search_request)
+
+        if session:
+            response = session.post(url, headers=headers, data=json_payload)
+        else:
+            response = requests.post(url, headers=headers, data=json_payload)
+
+        if response.status_code != 200:
+            return {'error': 'Failed to perform search', 'details': response.text}
+        
+        data = response.json()
+
+        items = data.get('items', [])
+
+        all_results.extend(items)
+
+        if len(items) < limit:
+            break
+
+        offset += limit
+
+    return all_results
 
 
 def perform_multi_search(access_token, queries, source, targets, **kwargs):

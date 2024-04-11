@@ -199,9 +199,10 @@ def search_results_to_dataframe(query, source_language, target_languages, option
 
         result = entries_requests.perform_single_search(access_token, query, source_language, target_languages, session=session, **optional_parameters)
         domains = catalogue_requests.get_domains(access_token, session=session)
-        if result and 'items' in result:
-            for item in result['items']:
-                entry = catalogue_requests.get_single_entity_by_href(access_token, item['self']['href'], session=session)
+
+        for r in result:
+            if 'self' in r:
+                entry = catalogue_requests.get_single_entity_by_href(access_token, r['self']['href'], session=session)
                 domain_hierarchy = []
                 for domain in entry['domains']:
                     domain_hierarchy.append(" > ".join(get_domain_hierarchy_by_code(domains, domain['code'])))
