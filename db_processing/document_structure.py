@@ -27,7 +27,7 @@ class DataField:
 
     document_field_json: List[dict]
 
-    def block_to_chunk(self, text: str, page_spans: dict, unit_block: list) -> Optional[Chunk]:
+    def block_to_chunk(self, text: str, page_spans: dict, unit_block: list, valid_word_count: int = 10) -> Optional[Chunk]:
         block_text = self._get_block_text(
             text, unit_block)
         block_start_index = unit_block[0]['start_char']
@@ -38,7 +38,7 @@ class DataField:
 
         if block_text.strip() != '':
             return Chunk(block_text, page_number,
-                            'content_text', validated=self._validate_chunk_text(text))
+                            'content_text', validated=self._validate_chunk_text(block_text, min_word_count=valid_word_count))
         return None
 
     def _get_block_text(self, text: str, unit_block: list) -> str:
@@ -58,9 +58,9 @@ class DataField:
             return page_number
         raise ValueError('Sentence block is not in the provided page range.')
     
-    def _validate_chunk_text(self, text):
+    def _validate_chunk_text(self, text, min_word_count=10):
         text = re.sub('(\n+| +)', ' ', text).strip()
-        if len(text.split(' ')) < 10:
+        if len(text.split(' ')) < min_word_count:
             return False
         return True
 

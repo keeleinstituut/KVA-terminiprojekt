@@ -15,6 +15,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 import logging
 import math
+from datetime import datetime
 
 
 # %%
@@ -106,6 +107,8 @@ def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk
             raise TypeError
         payload = document_metadata.copy()
         payload.update(chunk.get_data())
+        payload['date_created'] = datetime.date(datetime.today()).isoformat()
+        payload['date_modified'] = datetime.date(datetime.today()).isoformat()
         section_points.append(
                 PointStruct(id = last_idx + i,
                             vector=list(model.encode(chunk_text, normalize_embeddings=True, prompt=passage_prompt).astype(float)),
@@ -214,10 +217,10 @@ if __name__ == '__main__':
             field_keywords=document_json['field_keywords'],
             header_height=document_json['header_height'],
             footer_height=document_json['footer_height'],
-            table_extraction_strategy=document_json['table_extraction_strategy'],
-            horizontal_sorting=document_json['horizontal_sorting'],
-            footnote_regex=document_json['footnote_regex'],
-            footnote_group=document_json['footnote_group'],
+            table_extraction_strategy= 'None', # document_json['table_extraction_strategy'],
+            horizontal_sorting=True, #document_json['horizontal_sorting'],
+            footnote_regex= '',# document_json['footnote_regex'],
+            footnote_group=0, #document_json['footnote_group'],
             custom_regex=document_json['custom_regex'],
             term_data= TermData(document_json['term_data']),
             footnote_data=FootnoteData(document_json['footnote_data']),
