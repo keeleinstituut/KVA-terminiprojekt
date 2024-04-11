@@ -1,21 +1,22 @@
 # %%
 import argparse
 import json
+import logging
+import math
 import os
 import sys
+import uuid
+from datetime import datetime
 from typing import List
 
 import spacy
 from document_structure import (Chunk, ContentTextData, Document, FootnoteData,
                                 TableData, TermData, divide_chunks)
-from qdrant_client import QdrantClient
+from qdrant_client import QdrantClient, models
 from qdrant_client.http.models import Distance, PointStruct, VectorParams
 from sentence_transformers import SentenceTransformer
 from tqdm import tqdm
 from transformers import AutoTokenizer
-import logging
-import math
-from datetime import datetime
 
 
 # %%
@@ -30,8 +31,8 @@ class SpacySenter:
         # Spacy jaoks liigade pikkade tekstide jaotamine
         if len(text) >= 1000000:
             new_block_size = round(len(text) / math.ceil(
-                        len(text) / 1000000))  # for more equal chunks
-            text_blocks =  divide_chunks(text, new_block_size)
+                len(text) / 1000000))  # for more equal chunks
+            text_blocks = divide_chunks(text, new_block_size)
         else:
             text_blocks = [text]
 
@@ -66,18 +67,20 @@ class WhitespaceTokenizer:
             })
             char_counter += len(token) + 1
         return token_data
-    
+
+
 class E5Tokenizer:
 
     def __init__(self) -> None:
-        self.tokenizer = AutoTokenizer.from_pretrained('intfloat/multilingual-e5-large')
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            'intfloat/multilingual-e5-large')
 
     def get_tokens(self, text: str = '') -> List[dict]:
 
-
         token_data = list()
 
-        encoded_input = self.tokenizer.encode_plus(text, return_offsets_mapping=True, add_special_tokens=False, verbose=False)
+        encoded_input = self.tokenizer.encode_plus(
+            text, return_offsets_mapping=True, add_special_tokens=False, verbose=False)
 
         # The 'offset_mapping' contains the start and end positions of each token in the original text
         offset_mapping = encoded_input['offset_mapping']
@@ -91,12 +94,11 @@ class E5Tokenizer:
 
         return token_data
 
-    
 
-def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk], last_idx: int,  model, passage_prompt: dict = {}):
+def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk], chunk_id: str,  model, passage_prompt: dict = {}):
     section_points = list()
 
-    for i, chunk in enumerate(section_chunks, 1):    
+    for i, chunk in enumerate(section_chunks, 1):
         try:
             if not chunk.get_text():
                 continue
@@ -109,17 +111,34 @@ def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk
         payload.update(chunk.get_data())
         payload['date_created'] = datetime.date(datetime.today()).isoformat()
         payload['date_modified'] = datetime.date(datetime.today()).isoformat()
+
         section_points.append(
-                PointStruct(id = last_idx + i,
-                            vector=list(model.encode(chunk_text, normalize_embeddings=True, prompt=passage_prompt).astype(float)),
-                            payload=payload)
-                            )
+            PointStruct(id=chunk_id,
+                        vector=list(model.encode(
+                            chunk_text, normalize_embeddings=True, prompt=passage_prompt).astype(float)),
+                        payload=payload)
+        )
     return section_points
+
+
+def id_exists(collection_name, client, idx):
+    matching_id_entries = client.scroll(
+        collection_name=collection_name,  # Replace with your collection name
+        scroll_filter=models.Filter(
+            must=[
+                models.HasIdCondition(has_id=[idx])  # Filter by ID 7
+            ]))[0]
+
+    if len(matching_id_entries) > 0:
+        return True
+    return False
+
 
 if __name__ == '__main__':
 
     # Parsing arguments
-    parser = argparse.ArgumentParser(description="Script for adding KVA JSON data to Qdrant vector database-")
+    parser = argparse.ArgumentParser(
+        description="Script for adding KVA JSON data to Qdrant vector database-")
 
     parser.add_argument("arg1", type=str, help="Configuration file")
     parser.add_argument("arg2", type=str, help="Input JSON path")
@@ -144,17 +163,18 @@ if __name__ == '__main__':
         print(e)
         sys.exit(1)
 
-    
     # Configure logging
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
 
     # Create a file handler
-    file_handler = logging.FileHandler(os.path.join(args.arg3, args.arg2.split('/')[-1].split('.')[0] + '.log'))
+    file_handler = logging.FileHandler(os.path.join(
+        args.arg3, args.arg2.split('/')[-1].split('.')[0] + '.log'))
     file_handler.setLevel(logging.DEBUG)
 
     # Create a formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     # Set the formatter for the file handler
     file_handler.setFormatter(formatter)
@@ -183,13 +203,16 @@ if __name__ == '__main__':
     client = QdrantClient(client_host, port=client_port)
     logger.info(f'Connected to qdrant: {client_host}:{client_port}')
 
-    existing_collections = [coll.name for coll in client.get_collections().collections]
+    existing_collections = [
+        coll.name for coll in client.get_collections().collections]
 
     if collection_name not in existing_collections:
-        logger.info(f'Creating a new collection {collection_name} with embedding size {embedding_size}.')
+        logger.info(
+            f'Creating a new collection {collection_name} with embedding size {embedding_size}.')
         client.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=embedding_size, distance=Distance.COSINE),
+            vectors_config=VectorParams(
+                size=embedding_size, distance=Distance.COSINE),
         )
 
     logger.info('Initializing tokenizer and sentence parser.')
@@ -217,45 +240,47 @@ if __name__ == '__main__':
             field_keywords=document_json['field_keywords'],
             header_height=document_json['header_height'],
             footer_height=document_json['footer_height'],
-            table_extraction_strategy= 'None', # document_json['table_extraction_strategy'],
-            horizontal_sorting=True, #document_json['horizontal_sorting'],
-            footnote_regex= '',# document_json['footnote_regex'],
-            footnote_group=0, #document_json['footnote_group'],
+            # document_json['table_extraction_strategy'],
+            table_extraction_strategy='None',
+            horizontal_sorting=True,  # document_json['horizontal_sorting'],
+            footnote_regex='',  # document_json['footnote_regex'],
+            footnote_group=0,  # document_json['footnote_group'],
             custom_regex=document_json['custom_regex'],
-            term_data= TermData(document_json['term_data']),
+            term_data=TermData(document_json['term_data']),
             footnote_data=FootnoteData(document_json['footnote_data']),
             table_data=TableData(document_json['table_data']),
-            content_text_data=ContentTextData(document_json['content_text_data'])
-            )
+            content_text_data=ContentTextData(
+                document_json['content_text_data'])
+        )
 
         document_metadata = document.get_metadata()
         document_metadata['prompt'] = passage_prompt
 
-        # parse content chunks one by one 
-        content_chunks = document.content_text_data.to_chunks(sentensizer=senter, tokenizer=tokenizer, 
-                                                            max_tokens=max_tokens, 
-                                                            n_sentences_in_block=sentence_block_size)
+        # parse content chunks one by one
+        content_chunks = document.content_text_data.to_chunks(sentensizer=senter, tokenizer=tokenizer,
+                                                              max_tokens=max_tokens,
+                                                              n_sentences_in_block=sentence_block_size)
         term_chunks = document.term_data.to_chunks()
         footnote_chunks = document.footnote_data.to_chunks()
-        table_chunks = document.table_data.to_chunks(tokenizer=tokenizer, max_tokens=max_tokens)
-
+        table_chunks = document.table_data.to_chunks(
+            tokenizer=tokenizer, max_tokens=max_tokens)
 
         # Chunks to PointStruct
         for i, section_chunks in enumerate([content_chunks, term_chunks, footnote_chunks, table_chunks]):
             logger.info(f'Logging section {i}')
-            last_idx = client.get_collection(collection_name).vectors_count
-            if not last_idx:
-                last_idx = 0
+            chunk_id = str(uuid.uuid4())
 
-            section_points = section_chunks_to_points(document_metadata, section_chunks, last_idx, passage_prompt=passage_prompt, model=model)
+            while id_exists(collection_name, client, chunk_id):
+                chunk_id = str(uuid.uuid4())
+
+            section_points = section_chunks_to_points(
+                document_metadata, section_chunks, chunk_id=chunk_id, passage_prompt=passage_prompt, model=model)
 
             step = 100
-            for i in tqdm(range(0, len(section_points), step)): 
-                x = i 
+            for i in tqdm(range(0, len(section_points), step)):
+                x = i
                 operation_info = client.upsert(
                     collection_name=collection_name,
                     wait=False,
                     points=section_points[x:x+step])
             logger.info(f'{len(section_points)} chunks added to database')
-
-
