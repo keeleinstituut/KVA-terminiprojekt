@@ -95,7 +95,12 @@ class E5Tokenizer:
         return token_data
 
 
-def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk], chunk_id: str,  model, passage_prompt: dict = {}):
+def section_chunks_to_points(collection_name: str,
+                             client: QdrantClient,
+                             document_metadata: dict,
+                             section_chunks: List[Chunk],
+                             model,
+                             passage_prompt: dict = {}):
     section_points = list()
 
     for i, chunk in enumerate(section_chunks, 1):
@@ -112,6 +117,11 @@ def section_chunks_to_points(document_metadata: dict, section_chunks: List[Chunk
         payload['date_created'] = datetime.date(datetime.today()).isoformat()
         payload['date_modified'] = datetime.date(datetime.today()).isoformat()
 
+        chunk_id = str(uuid.uuid4())
+
+        while id_exists(collection_name, client, chunk_id):
+            chunk_id = str(uuid.uuid4())
+
         section_points.append(
             PointStruct(id=chunk_id,
                         vector=list(model.encode(
@@ -126,10 +136,26 @@ def id_exists(collection_name, client, idx):
         collection_name=collection_name,  # Replace with your collection name
         scroll_filter=models.Filter(
             must=[
-                models.HasIdCondition(has_id=[idx])  # Filter by ID 7
+                models.HasIdCondition(has_id=[idx])  # Filter by ID
             ]))[0]
 
     if len(matching_id_entries) > 0:
+        return True
+    return False
+
+
+def file_exists(filename: str, filename_field: str = 'filename'):
+    matching_file_entries = client.scroll(
+        collection_name=collection_name,  # Replace with your collection name
+        scroll_filter=models.Filter(
+            must=[
+                models.FieldCondition(
+                    key=filename_field,
+                    match=models.MatchValue(value=filename),
+                ),
+            ]))[0]
+
+    if len(matching_file_entries) > 0:
         return True
     return False
 
@@ -256,6 +282,13 @@ if __name__ == '__main__':
         document_metadata = document.get_metadata()
         document_metadata['prompt'] = passage_prompt
 
+        # Check if a Document with the same filename already exists
+        if file_exists(filename=document.filename):
+            logger.error("File %s already exists in collection.",
+                         document.filename)
+            raise FileExistsError(
+                "File %s already exists in collection.", document.filename)
+
         # parse content chunks one by one
         content_chunks = document.content_text_data.to_chunks(sentensizer=senter, tokenizer=tokenizer,
                                                               max_tokens=max_tokens,
@@ -266,18 +299,14 @@ if __name__ == '__main__':
             tokenizer=tokenizer, max_tokens=max_tokens)
 
         # Chunks to PointStruct
-        for i, section_chunks in enumerate([content_chunks, term_chunks, footnote_chunks, table_chunks]):
+        for i, section_chunks in tqdm(enumerate([content_chunks, term_chunks, footnote_chunks, table_chunks])):
             logger.info(f'Logging section {i}')
-            chunk_id = str(uuid.uuid4())
 
-            while id_exists(collection_name, client, chunk_id):
-                chunk_id = str(uuid.uuid4())
-
-            section_points = section_chunks_to_points(
-                document_metadata, section_chunks, chunk_id=chunk_id, passage_prompt=passage_prompt, model=model)
+            section_points = section_chunks_to_points(collection_name, client, document_metadata,
+                                                      section_chunks, passage_prompt=passage_prompt, model=model)
 
             step = 100
-            for i in tqdm(range(0, len(section_points), step)):
+            for i in range(0, len(section_points), step):
                 x = i
                 operation_info = client.upsert(
                     collection_name=collection_name,
