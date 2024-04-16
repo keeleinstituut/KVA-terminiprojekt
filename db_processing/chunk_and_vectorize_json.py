@@ -53,6 +53,9 @@ class SpacySenter:
 class WhitespaceTokenizer:
 
     def get_tokens(self, text: str = '') -> List[dict]:
+        """
+        Tokenizes based on whitespace and returns list of dictionaries with text, start_char and end_char for each token.
+        """
         token_data = list()
 
         tokens = text.split(' ')
@@ -71,11 +74,15 @@ class WhitespaceTokenizer:
 
 class E5Tokenizer:
 
+
     def __init__(self) -> None:
         self.tokenizer = AutoTokenizer.from_pretrained(
             'intfloat/multilingual-e5-large')
 
     def get_tokens(self, text: str = '') -> List[dict]:
+        """
+        Tokenizes using 'intfloat/multilingual-e5-large' and returns list of dictionaries with text, start_char and end_char for each token.
+        """
 
         token_data = list()
 
@@ -101,6 +108,26 @@ def section_chunks_to_points(collection_name: str,
                              section_chunks: List[Chunk],
                              model,
                              passage_prompt: dict = {}):
+    """
+    Transforms chunks of document sections into point structures suitable for indexing in a Qdrant vector database.
+
+    This function iterates over a list of document section chunks, encodes them into vectors using a provided model, 
+    and packages these vectors along with metadata into point structures. Each point structure includes a unique identifier,
+    vector representation of the chunk text, and additional metadata such as creation and modification dates.
+
+    Args:
+        - collection_name (str): The name of the collection within the Qdrant database where the points will be stored.
+        - client (QdrantClient): An instance of the QdrantClient used to interact with the Qdrant database.
+        - document_metadata (dict): A dictionary containing metadata that applies to the entire document.
+        - section_chunks (List[Chunk]): A list of Chunk objects representing segments of the document.
+        - model: A model object capable of encoding text into vector representations.
+        - passage_prompt (dict, optional): Additional parameters or prompts to be passed to the model during the encoding process. Defaults to an empty dictionary.
+
+    Returns:
+        List[PointStruct]: A list of PointStruct objects, each containing a unique identifier, a vector representation of the text, and the payload of metadata.
+    """
+
+
     section_points = list()
 
     for i, chunk in enumerate(section_chunks, 1):
@@ -132,6 +159,17 @@ def section_chunks_to_points(collection_name: str,
 
 
 def id_exists(collection_name, client, idx):
+    """
+    Checks, whether an ID exists in given collection or not.
+
+    Args:
+        - collection_name (str): The name of the collection within the Qdrant database where the points will be stored.
+        - client (QdrantClient): An instance of the QdrantClient used to interact with the Qdrant database.
+        - id(int or str): The identifier to check for	
+
+    Returns:
+        bool: True if the index already exists in given collection, otherwise Flase
+    """
     matching_id_entries = client.scroll(
         collection_name=collection_name,  # Replace with your collection name
         scroll_filter=models.Filter(
@@ -144,7 +182,19 @@ def id_exists(collection_name, client, idx):
     return False
 
 
-def file_exists(filename: str, filename_field: str = 'filename'):
+def file_exists(collection_name, client, filename: str, filename_field: str = 'filename'):
+    """
+    Checks, whether the filename is already present in given collection or not.
+
+    Args:
+        - collection_name (str): The name of the collection within the Qdrant database where the points will be stored.
+        - client (QdrantClient): An instance of the QdrantClient used to interact with the Qdrant database.
+        - filename: The filename to check for.
+        - filename_field: The field to search the match from.
+
+    Returns:
+        bool: True if the filename already exists in given collection, otherwise Flase
+    """
     matching_file_entries = client.scroll(
         collection_name=collection_name,  # Replace with your collection name
         scroll_filter=models.Filter(
@@ -283,7 +333,7 @@ if __name__ == '__main__':
         document_metadata['prompt'] = passage_prompt
 
         # Check if a Document with the same filename already exists
-        if file_exists(filename=document.filename):
+        if file_exists(client=client, collection_name=collection_name, filename=document.filename):
             logger.error("File %s already exists in collection.",
                          document.filename)
             raise FileExistsError(
