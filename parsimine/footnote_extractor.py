@@ -9,15 +9,15 @@ class FootnoteExtractor:
     """
     A class to extract footnotes from PDF documents using PyMuPDF (fitz).
     
-    Attributes:
-        pattern (str): The regular expression pattern used to identify footnotes.
-        footnote_group (int): The group number in the regular expression to extract the footnote text.
+    Args:
+        - pattern (str): The regular expression pattern used to identify footnotes.
+        - footnote_group (int): The group number in the regular expression to extract the footnote text.
     
     Methods:
-        extract_footnotes_from_page(page: fitz.Page, header_height: int =  0, footer_height: int =  0) -> str: Extracts footnotes from a single PDF page.
-        extract_footnotes_from_doc(doc: fitz.Document, header_height: int =  0, footer_height: int =  0) -> str: Extracts footnotes from an entire PDF document.
-        __is_footnote(text: str, current_block_index: int, total_blocks: int) -> bool: Checks if a text block is a footnote based on the pattern and position.
-        __extract_footnotes(text: str) -> List[str]: Splits a block of text into individual footnotes based on the pattern.
+        - extract_footnotes_from_page(page: fitz.Page, header_height: int =  0, footer_height: int =  0) -> str: Extracts footnotes from a single PDF page.
+        - extract_footnotes_from_doc(doc: fitz.Document, header_height: int =  0, footer_height: int =  0) -> str: Extracts footnotes from an entire PDF document.
+        - __is_footnote(text: str, current_block_index: int, total_blocks: int) -> bool: Checks if a text block is a footnote based on the pattern and position.
+        - __extract_footnotes(text: str) -> List[str]: Splits a block of text into individual footnotes based on the pattern.
     """
         
     def __init__(self, footnote_pattern: str = r'^\d+\s+(.*)', footnote_group: int = 1):
@@ -28,13 +28,13 @@ class FootnoteExtractor:
         """
         Extract footnotes from a single PDF page.
         
-        Parameters:
-            page (fitz.Page): The page from which to extract footnotes.
-            header_height (int): The height of the page header to exclude from extraction.
-            footer_height (int): The height of the page footer to exclude from extraction.
+        Args:
+            - page (fitz.Page): The page from which to extract footnotes.
+            - header_height (int): The height of the page header to exclude from extraction.
+            - footer_height (int): The height of the page footer to exclude from extraction.
         
         Returns:
-            str: A JSON string representing the extracted footnotes, or None if no footnotes were found.
+            - str: A JSON string representing the extracted footnotes, or None if no footnotes were found.
         """
         footnotes = list()
         footnote_bboxes = list()
@@ -63,13 +63,13 @@ class FootnoteExtractor:
         """
         Extract footnotes from an entire PDF document.
         
-        Parameters:
-            doc (fitz.Document): The PDF document from which to extract footnotes.
-            header_height (int): The height of the page header to exclude from extraction.
-            footer_height (int): The height of the page footer to exclude from extraction.
+        Args:
+            - doc (fitz.Document): The PDF document from which to extract footnotes.
+            - header_height (int): The height of the page header to exclude from extraction.
+            - footer_height (int): The height of the page footer to exclude from extraction.
         
         Returns:
-            str: A JSON string representing all extracted footnotes from the document.
+            - str: A JSON string representing all extracted footnotes from the document.
         """
         all_footnotes = []
         for page in doc:
@@ -82,9 +82,9 @@ class FootnoteExtractor:
     
     def __is_footnote(self, text: str, current_block_index: int, total_blocks: int) -> bool:
         """
-        Footnote'i tingimused:
-        1. Footnote algab numbri ja tühikuga, millele järgneb sõna. Võtab arvesse, et ühes blockis võib olla mitu footnote'i (seepärast re.MULTILINE).
-        2. Enne footnote'i on rohkem blocke kui pärast footnote'i.
+        Conditions for a valid footenote:
+        1. Footnote begins with a number and space combination, followed by a word. One block may contain multiple footenotes, thats why re.MULTILINE flag is raised.
+        2. There are more blocks before than after a footnote.
         """
         footnote_pattern = self.pattern
         footnote_match = re.match(footnote_pattern, text.strip(), re.MULTILINE)
@@ -100,11 +100,11 @@ class FootnoteExtractor:
         """
         Splits a block of text into individual footnotes based on the pattern.
         
-        Parameters:
-            text (str): The text block to split.
+        Args:
+            - text (str): The text block to split.
         
         Returns:
-            List[str]: A list of individual footnotes extracted from the text block.
+            - List[str]: A list of individual footnotes extracted from the text block.
         """
         lines = text.split('\n')
         page_footnotes = []

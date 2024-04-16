@@ -33,13 +33,13 @@ class TableExtractor:
         """
         Extract tables from a single PDF page using the specified strategy and join_tolerance.
 
-        Parameters:
-            page (fitz.Page): The page from which to extract tables.
-            header_height (int): The height of the page header to exclude from extraction.
-            footer_height (int): The height of the page footer to exclude from extraction.
+        Args:
+            - page (fitz.Page): The page from which to extract tables.
+            - header_height (int): The height of the page header to exclude from extraction.
+            - footer_height (int): The height of the page footer to exclude from extraction.
 
         Returns:
-            str: A JSON string representing the extracted tables, or None if no tables were found.
+            - str: A JSON string representing the extracted tables, or None if no tables were found.
         """
         # Extract tables from a single page using the specified strategy and join_tolerance.
         # The clip parameter is optional and can be used to specify a portion of the page.
@@ -77,13 +77,13 @@ class TableExtractor:
         """
         Extract tables from an entire PDF document.
         
-        Parameters:
-            doc (fitz.Document): The PDF document from which to extract tables.
-            header_height (int): The height of the page header to exclude from extraction.
-            footer_height (int): The height of the page footer to exclude from extraction.
+        Args:
+            - doc (fitz.Document): The PDF document from which to extract tables.
+            - header_height (int): The height of the page header to exclude from extraction.
+            - footer_height (int): The height of the page footer to exclude from extraction.
         
         Returns:
-            str: A JSON string representing all extracted tables from the document.
+            - str: A JSON string representing all extracted tables from the document.
         """
         all_tables = []
         for page in doc:
@@ -98,13 +98,13 @@ class TableExtractor:
         """
         Check if a table is valid based on the minimum number of rows and columns.
         
-        Parameters:
-            tab (fitz.table.Table): The table to validate.
-            min_row_count (int): The minimum number of rows a table must have.
-            min_col_count (int): The minimum number of columns a table must have.
+        Args:
+            - tab (fitz.table.Table): The table to validate.
+            - min_row_count (int): The minimum number of rows a table must have.
+            - min_col_count (int): The minimum number of columns a table must have.
         
         Returns:
-            bool: True if the table is valid, False otherwise.
+            - bool: True if the table is valid, False otherwise.
         """
         if tab.row_count < min_row_count or tab.col_count < min_col_count:
             return False

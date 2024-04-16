@@ -79,7 +79,7 @@ class BlockExtractor:
 
 
 if __name__ == "__main__":
-    # Example usage
+    # Example usage of BlockExtractor
     doc_path = "C:/Users/sandra.eiche/Documents/kood/parser_comparison/varia_data/20181206-tp525-3-1-the-us-army-in-mdo-2028-final.pdf"
     page_ranges = []  # Define your page ranges here
 
@@ -95,9 +95,7 @@ if __name__ == "__main__":
 
 
 
-    """
-
-    # Example usage
+    # Example usage of RegexBlockExtractor
     doc_path = "C://Users//sandra.eiche//Documents//kood//parser_comparison//varia_data//aap6.pdf"
     page_ranges = [(50, 50)]  # Define your page ranges here
 
@@ -114,5 +112,3 @@ if __name__ == "__main__":
 
     # Close the document when done
     doc.close()
-
-    """
