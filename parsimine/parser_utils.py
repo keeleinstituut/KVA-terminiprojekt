@@ -144,3 +144,64 @@ def join_jsons(term_json_list: list):
         merged_list.extend(json.loads(term_json))
 
     return json.dumps(merged_list)
+
+
+def reformat_text(text: str) -> str:
+    """
+    Joins lines that don't end with a period or other punctuation marks denoting the end of sentence (incl. numbers).
+    Also, replace consecutive empty lines with a single newline character.
+
+    Parameters:
+    - text (str): The text to be reformatted.
+
+    Returns:
+    - str: The reformatted text.
+    """
+
+    rows = text.split('\n')
+    #modified_rows = []
+    full_text = ''
+    last_char = ''
+
+    for row in rows:
+
+        stripped = row.strip()
+        start_delimiter = ''
+        end_delimiter = ''
+
+
+        if full_text:
+            last_char = full_text[-1]
+        
+        # Single line break
+        if stripped == '':
+            end_delimiter = '\n'
+        
+        # Uppercased or title-cased strings or strings not containing any alphabetic characters (Latin)
+        elif stripped.isupper() or stripped.istitle() or stripped.upper().isupper() == False:
+            end_delimiter = '\n'
+            if last_char not in ['', '\n']:
+                start_delimiter = '\n'
+
+            #if not last_char or last_char == '\n':
+                
+                #full_text += f'{stripped}\n'
+            #else:
+             #   full_text += f'\n{stripped}\n'
+
+        elif last_char not in '0123456789.?!)' and last_char != '\n':
+            start_delimiter = ' '
+            #full_text += f' {stripped}'
+        
+        elif last_char and last_char != '\n':
+            start_delimiter = '\n'
+        
+        """else:
+            if not last_char or last_char == '\n':
+                full_text += f'{stripped}'
+            else:
+                full_text += f'\n{stripped}'"""
+        
+        full_text += f'{start_delimiter}{stripped}{end_delimiter}'
+
+    return full_text
