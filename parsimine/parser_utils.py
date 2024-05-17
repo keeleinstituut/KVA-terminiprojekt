@@ -159,12 +159,10 @@ def reformat_text(text: str) -> str:
     """
 
     rows = text.split('\n')
-    #modified_rows = []
     full_text = ''
     last_char = ''
 
     for row in rows:
-
         stripped = row.strip()
         start_delimiter = ''
         end_delimiter = ''
@@ -173,8 +171,11 @@ def reformat_text(text: str) -> str:
         if full_text:
             last_char = full_text[-1]
         
+        if stripped == '' and last_char in ['', '\n']:
+            continue
+
         # Single line break
-        if stripped == '':
+        if stripped == '' and last_char != '\n':
             end_delimiter = '\n'
         
         # Uppercased or title-cased strings or strings not containing any alphabetic characters (Latin)
@@ -183,24 +184,11 @@ def reformat_text(text: str) -> str:
             if last_char not in ['', '\n']:
                 start_delimiter = '\n'
 
-            #if not last_char or last_char == '\n':
-                
-                #full_text += f'{stripped}\n'
-            #else:
-             #   full_text += f'\n{stripped}\n'
-
         elif last_char not in '0123456789.?!)' and last_char != '\n':
             start_delimiter = ' '
-            #full_text += f' {stripped}'
         
         elif last_char and last_char != '\n':
             start_delimiter = '\n'
-        
-        """else:
-            if not last_char or last_char == '\n':
-                full_text += f'{stripped}'
-            else:
-                full_text += f'\n{stripped}'"""
         
         full_text += f'{start_delimiter}{stripped}{end_delimiter}'
 
