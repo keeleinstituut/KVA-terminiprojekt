@@ -2,7 +2,7 @@ import requests
 import json
 
 
-def perform_single_search(access_token, query, source, targets, session=None, **kwargs):
+def perform_single_search(access_token, query, source, targets, num_pages=1, session=None, **kwargs):
     """
     Perform a single search request to the IATE API using an optional requests session.
 
@@ -39,7 +39,7 @@ def perform_single_search(access_token, query, source, targets, session=None, **
 
     all_results = []
     
-    while True:
+    for _ in range(num_pages):
         search_request = {
             "query": query,
             "source": source,
@@ -63,6 +63,9 @@ def perform_single_search(access_token, query, source, targets, session=None, **
 
         items = data.get('items', [])
 
+        if not items:
+            break
+
         all_results.extend(items)
 
         if len(items) < limit:
@@ -70,6 +73,7 @@ def perform_single_search(access_token, query, source, targets, session=None, **
 
         offset += limit
 
+    print('all resultsi pikkus: ' + str(len(all_results)))
     return all_results
 
 

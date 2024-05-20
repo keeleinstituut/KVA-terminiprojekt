@@ -32,7 +32,6 @@ def dataframes_to_excel(df1, df2, df3, df4, df5, path):
                 worksheet.set_row(row_num, None, border_wrap_format)
                 worksheet.write_url(row_num, 0, current_link, link_format)
             else:
-                # For the last row with a unique link, you need to apply link_format explicitly
                 if row_num == len(df1) or (next_link and current_link != next_link):
                     worksheet.write_url(row_num, 0, current_link, link_format)
 

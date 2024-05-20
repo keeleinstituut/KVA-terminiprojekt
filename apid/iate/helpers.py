@@ -245,13 +245,13 @@ def process_entry(entry, domains, target_languages):
     return processed_entries
 
 
-def search_results_to_dataframe(query, source_language, target_languages, optional_parameters):
+def search_results_to_dataframe(query, source_language, target_languages, num_pages, optional_parameters):
     with requests.Session() as session:
         tokens = authentication_requests.get_iate_tokens(session=session)
         access_token = tokens['tokens'][0]['access_token']
         results_list = []
 
-        results = entries_requests.perform_single_search(access_token, query, source_language, target_languages, session=session, **optional_parameters)
+        results = entries_requests.perform_single_search(access_token, query, source_language, target_languages, num_pages, session=session, **optional_parameters)
         domains = catalogue_requests.get_domains(access_token, session=session)
 
         for r in results:
