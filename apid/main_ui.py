@@ -9,7 +9,18 @@ from mw.helpers import json_to_df_with_definitions_and_usages
 
 pn.extension('tabulator')
 
-def fetch_results(query, source_language, target_languages, num_pages, search_in_fields, query_operator, optional_parameters):
+
+# Define a CSS style for text wrapping
+css = """
+.tabulator-cell {
+    white-space: pre-wrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+"""
+pn.config.raw_css.append(css)
+
+def fetch_results(query, source_language, target_languages, num_pages, optional_parameters):
     iate_results = search_results_to_dataframe(query, source_language, target_languages, num_pages, optional_parameters)
     collins_english_results = entry_data_to_dataframe('english', query, 100, 1)
     collins_cobuild_advanced_british_results = entry_cobuild_data_to_dataframe('english-learner', query, 100, 1)
@@ -30,7 +41,7 @@ target_languages_input = pn.widgets.TextInput(name='Target Languages', placehold
 num_pages_input = pn.widgets.IntInput(name='Number of Pages', value=1, step=1)
 search_in_fields_input = pn.widgets.CheckBoxGroup(
     name='Search In Fields',
-    value=[0,2,7],
+    value=[0],
     options={
         'Term entry def': 0,
         'Term entry note': 2,
@@ -78,20 +89,20 @@ def on_click(event):
     }
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
-        query, source_language, target_languages, num_pages, search_in_fields, query_operator, optional_parameters)
+        query, source_language, target_languages, num_pages, optional_parameters)
     
     response_area.clear()
     response_area.append(pn.pane.Markdown("### IATE"))
-    response_area.append(pn.widgets.Tabulator(iate_results, groupby=['IATE link'], show_index=False, sizing_mode='stretch_width', layout='fit_data_fill'))
+    response_area.append(pn.widgets.Tabulator(iate_results, groupby=['IATE link'], show_index=False, sizing_mode='stretch_width', layout='fit_columns'))
 
     response_area.append(pn.pane.Markdown("### Collins English"))
-    response_area.append(pn.widgets.Tabulator(collins_english_results, show_index=False, sizing_mode='stretch_width', layout='fit_data_fill'))
+    response_area.append(pn.widgets.Tabulator(collins_english_results, show_index=False, sizing_mode='stretch_width', layout='fit_columns', width=800))
     response_area.append(pn.pane.Markdown("### Collins COBUILD Advanced British"))
-    response_area.append(pn.widgets.Tabulator(collins_cobuild_advanced_british_results, show_index=False, sizing_mode='stretch_width', layout='fit_data_fill'))
+    response_area.append(pn.widgets.Tabulator(collins_cobuild_advanced_british_results, show_index=False, sizing_mode='stretch_width', layout='fit_columns', width=800))
     response_area.append(pn.pane.Markdown("### Collins COBUILD Advanced American"))
-    response_area.append(pn.widgets.Tabulator(collins_cobuild_advanced_american_results, show_index=False, sizing_mode='stretch_width', layout='fit_data_fill'))
+    response_area.append(pn.widgets.Tabulator(collins_cobuild_advanced_american_results, show_index=False, sizing_mode='stretch_width', layout='fit_columns', width=800))
     response_area.append(pn.pane.Markdown("### MW Dictionary"))
-    response_area.append(pn.widgets.Tabulator(mw_dict_results, show_index=False, sizing_mode='stretch_width', layout='fit_data_fill'))
+    response_area.append(pn.widgets.Tabulator(mw_dict_results, show_index=False, sizing_mode='stretch_width', layout='fit_columns', width=800))
 
 fetch_button.on_click(on_click)
 
