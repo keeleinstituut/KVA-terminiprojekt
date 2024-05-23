@@ -47,7 +47,8 @@ def perform_single_search(access_token, query, source, targets, num_pages=1, ses
             "source": source,
             "targets": targets,
             "offset": offset,
-            "limit": limit, 
+            "limit": limit,
+            "fields_set_name": "minimal", 
             **kwargs           
         }
 

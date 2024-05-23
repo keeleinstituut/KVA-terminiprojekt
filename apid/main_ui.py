@@ -3,6 +3,7 @@ import pandas as pd
 from collins.helpers import entry_data_to_dataframe, entry_cobuild_data_to_dataframe
 from iate.helpers import search_results_to_dataframe
 from mw.helpers import json_to_df_with_definitions_and_usages
+import time
 
 pn.extension('tabulator')
 
@@ -17,6 +18,7 @@ pn.config.raw_css.append(css)
 
 
 def on_click(event):
+
     query = query_input.value
 
     source_language = source_language_input.value
@@ -34,10 +36,18 @@ def on_click(event):
         'query_operator': query_operator,
         'search_in_fields': search_in_fields
     }
+    
+    fetch_algus = time.time()
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
         query, source_language, target_languages, num_pages, optional_parameters)
     
+    fetch_lopp = time.time()
+
+    print(f'Fetching results took {fetch_lopp - fetch_algus:.2f} seconds')
+
+    kuva_algus = time.time()
+
     response_area.clear()
     response_area.append(pn.pane.Markdown("## IATE"))
 
@@ -65,13 +75,39 @@ def on_click(event):
 
     response_area.append(pn.widgets.Tabulator(combined_df, show_index=False, layout='fit_columns', width=2000))
 
+    kuva_lopp = time.time()
+
+    print(f'Kuvamine võttis aega: {kuva_lopp - kuva_algus:.2f}')
+
 
 def fetch_results(query, source_language, target_languages, num_pages, optional_parameters):
+    iate_algus = time.time()
     iate_results = search_results_to_dataframe(query, source_language, target_languages, num_pages, optional_parameters)
+    iate_lopp = time.time()
+
+    print(f'Fetching IATE results took {iate_lopp - iate_algus:.2f} seconds')
+
+    print('')
+
+    collins_algus = time.time()
     collins_english_results = entry_data_to_dataframe('english', query, 100, 1)
+    collins_lopp = time.time()
+    print(f'Fetching Collins English results took {collins_lopp - collins_algus:.2f} seconds')
+
+    collins_algus_2 = time.time()
     collins_cobuild_advanced_british_results = entry_cobuild_data_to_dataframe('english-learner', query, 100, 1)
+    collins_lopp_2 = time.time()
+    print(f'Fetching Collins Adv Br results took {collins_lopp_2 - collins_algus_2:.2f} seconds')
+
+    collins_cob_am_algus = time.time()
     collins_cobuild_advanced_american_results = entry_cobuild_data_to_dataframe('american-learner', query, 100, 1)
+    collins_cob_am_lopp = time.time()
+    print(f'Fetching Collins Cobuild American results took {collins_cob_am_lopp - collins_cob_am_algus:.2f} seconds')
+
+    mw_algus = time.time()
     mw_dict_results = json_to_df_with_definitions_and_usages(query)
+    mw_lopp = time.time()
+    print(f'Fetching MW results took {mw_lopp - mw_algus:.2f} seconds')
 
     return iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results
 
