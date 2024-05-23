@@ -54,10 +54,12 @@ def on_click(event):
     html_columns = {
         'IATE link': {'type': 'html'},
         'Termini allikaviide': {'type': 'html'},
+        'Termini märkus': {'type': 'html'},
+        'Termini märkuse allikaviide': {'type': 'html'},
         'Definitsioon': {'type': 'html'},
         'Definitsiooni allikaviited': {'type': 'html'},
-        'Märkus': {'type': 'html'},
-        'Märkuse allikaviide': {'type': 'html'},
+        'Mõiste märkus': {'type': 'html'},
+        'Mõiste märkuse allikaviide': {'type': 'html'},
         'Kasutusnäide': {'type': 'html'},
         'Kasutusnäite allikaviide': {'type': 'html'}
     }

@@ -3,7 +3,7 @@ import json
 from datetime import datetime
     
 
-def perform_single_search(access_token, query, source, targets, num_pages=1, session=None, **kwargs):
+def perform_single_search(access_token, query, source, targets, num_pages=5, session=None, **kwargs):
 
     """
     Perform a single search request to the IATE API using an optional requests session.
@@ -36,7 +36,7 @@ def perform_single_search(access_token, query, source, targets, num_pages=1, ses
         'Authorization': f'Bearer {access_token}'
     }
 
-    limit = kwargs.pop('limit', 10)
+    limit = kwargs.pop('limit', 100)
     offset = kwargs.pop('offset', 0)
 
     all_results = []

@@ -45,15 +45,27 @@ def process_entry(entry, domains, target_languages):
                         def_references += '; '
                     def_refs = def_references.strip('; ')
 
+                note_texts = ''
 
-                    #cleaned_refs = [clean_term_source(item) for item in lang_data['definition_references']]
-                    #def_refs = '; '.join(cleaned_refs).strip('; ')
+                if 'note' in lang_data:
+                    note_texts += lang_data['note']['value']
 
                 note_refs = ''
+
                 if 'note_references' in lang_data:
-                    note_refs = lang_data.get(['note_references'], [])
-                    #cleaned_refs = [clean_term_source(item) for item in lang_data['note_references']]
-                    #note_refs = '; '.join(cleaned_refs).strip('; ')
+                    for ref in lang_data['note_references']:
+                        note_refs += ref['text']
+                
+                term_note_text = ''
+
+                if 'note' in term_entry:
+                    term_note_text += term_entry['note']['value']
+
+                term_note_references = ''
+
+                if 'note_references' in term_entry:
+                    for ref in term_entry['note_references']:
+                        term_note_references += ref['text']
 
                 context_texts = ''
 
@@ -82,10 +94,12 @@ def process_entry(entry, domains, target_languages):
                     'Keel': tl.upper(),
                     'Termin': term_entry['term_value'],
                     'Termini allikaviide': term_refs,
+                    'Termini märkus': term_note_text,
+                    'Termini märkuse allikaviide': term_note_references,
                     'Definitsioon': definition_with_link,
                     'Definitsiooni allikaviited': def_refs,
-                    'Märkus': lang_data['note']['value'] if 'note' in lang_data else '',
-                    'Märkuse allikaviide': note_refs,
+                    'Mõiste märkus': note_texts,
+                    'Mõiste märkuse allikaviide': note_refs,
                     'Kasutusnäide': context_texts,
                     'Kasutusnäite allikaviide': context_refs
                     }
