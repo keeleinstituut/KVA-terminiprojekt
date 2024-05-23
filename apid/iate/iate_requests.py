@@ -1,8 +1,10 @@
 import requests
 import json
-
+from datetime import datetime
+    
 
 def perform_single_search(access_token, query, source, targets, num_pages=1, session=None, **kwargs):
+
     """
     Perform a single search request to the IATE API using an optional requests session.
 
@@ -38,7 +40,7 @@ def perform_single_search(access_token, query, source, targets, num_pages=1, ses
     offset = kwargs.pop('offset', 0)
 
     all_results = []
-    
+
     for _ in range(num_pages):
         search_request = {
             "query": query,
@@ -73,7 +75,6 @@ def perform_single_search(access_token, query, source, targets, num_pages=1, ses
 
         offset += limit
 
-    print('all resultsi pikkus: ' + str(len(all_results)))
     return all_results
 
 
@@ -116,3 +117,22 @@ def perform_multi_search(access_token, queries, source, targets, **kwargs):
         return response.json()
     else:
         return {'error': 'Failed to perform search', 'details': response.text}
+    
+
+
+def get_single_entity_by_href(access_token, href, session=None):
+
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Accept': 'application/json'
+    }
+
+    if session:
+        response = session.get(href, headers=headers)
+    else:
+        response = requests.get(href, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return response.status_code
