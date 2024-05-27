@@ -52,19 +52,20 @@ def on_click(event):
     response_area.append(pn.pane.Markdown("## IATE"))
 
     html_columns = {
-        'IATE link': {'type': 'html'},
-        'Termini allikaviide': {'type': 'html'},
-        'Termini märkus': {'type': 'html'},
-        'Termini märkuse allikaviide': {'type': 'html'},
-        'Definitsioon': {'type': 'html'},
-        'Definitsiooni allikaviited': {'type': 'html'},
-        'Mõiste märkus': {'type': 'html'},
-        'Mõiste märkuse allikaviide': {'type': 'html'},
-        'Kasutusnäide': {'type': 'html'},
-        'Kasutusnäite allikaviide': {'type': 'html'}
+        'Link': {'type': 'html'},
+        'Term ref': {'type': 'html'},
+        'Term note': {'type': 'html'},
+        'Term note ref': {'type': 'html'},
+        'Def': {'type': 'html'},
+        'Def ref': {'type': 'html'},
+        'Note': {'type': 'html'},
+        'Note ref': {'type': 'html'},
+        'Context': {'type': 'html'},
+        'Context ref': {'type': 'html'}
     }
 
-    response_area.append(pn.widgets.Tabulator(iate_results, groupby=['IATE link'], show_index=False, formatters=html_columns,  layout='fit_columns', width=2000))
+
+    response_area.append(pn.widgets.Tabulator(iate_results, groupby=['Link'], show_index=False, formatters=html_columns,  layout='fit_columns', width=2000))
 
     response_area.append(pn.pane.Markdown("## Dictionaries"))
 
@@ -150,7 +151,7 @@ query_operator_input = pn.widgets.Select(
         "All Words": 1,
         "Exact String": 2,
         "Exact Match": 3,
-        "Regular Expression": 4,
+        #"Regular Expression": 4,
         "Partial String": 5,
         "In": 6,
         "Not In": 7,

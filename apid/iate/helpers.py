@@ -86,22 +86,22 @@ def process_entry(entry, domains, target_languages):
                     definition_with_link = lang_data.get('definition', '')
 
                 processed_entry = {
-                    'IATE link': '<a href="https://iate.europa.eu/entry/result/' + str(entry['id']) + '">' + str(entry['id']) + '</a>',
+                    'Link': '<a href="https://iate.europa.eu/entry/result/' + str(entry['id']) + '">' + str(entry['id']) + '</a>',
                     #'ID': str(entry['id']),
-                    'Lisatud': creation_time,
-                    'Muudetud': modification_time,
-                    'Valdkond': domain_hierarchy_str,
-                    'Keel': tl.upper(),
-                    'Termin': term_entry['term_value'],
-                    'Termini allikaviide': term_refs,
-                    'Termini märkus': term_note_text,
-                    'Termini märkuse allikaviide': term_note_references,
-                    'Definitsioon': definition_with_link,
-                    'Definitsiooni allikaviited': def_refs,
-                    'Mõiste märkus': note_texts,
-                    'Mõiste märkuse allikaviide': note_refs,
-                    'Kasutusnäide': context_texts,
-                    'Kasutusnäite allikaviide': context_refs
+                    'Added': creation_time,
+                    'Modified': modification_time,
+                    'Domain': domain_hierarchy_str,
+                    'Lang': tl.upper(),
+                    'Term': term_entry['term_value'],
+                    'Term ref': term_refs,
+                    'Term note': term_note_text,
+                    'Term note ref': term_note_references,
+                    'Def': definition_with_link,
+                    'Def ref': def_refs,
+                    'Note': note_texts,
+                    'Note ref': note_refs,
+                    'Context': context_texts,
+                    'Context ref': context_refs
                     }
                 
                 processed_entries.append(processed_entry)
