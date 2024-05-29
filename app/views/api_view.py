@@ -1,8 +1,8 @@
 import panel as pn
 import pandas as pd
-from collins.helpers import entry_data_to_dataframe, entry_cobuild_data_to_dataframe
-from iate.helpers import search_results_to_dataframe
-from mw.helpers import json_to_df_with_definitions_and_usages
+from utils.collins_api_helpers import entry_data_to_dataframe, entry_cobuild_data_to_dataframe
+from utils.iate_api_helpers import search_results_to_dataframe
+from utils.mw_api_helpers import json_to_df_with_definitions_and_usages
 import time
 
 pn.extension('tabulator')
@@ -18,12 +18,9 @@ pn.config.raw_css.append(css)
 
 
 def on_click(event):
-
     query = query_input.value
-
     source_language = source_language_input.value
     target_languages = target_languages_input.value
-
     num_pages = num_pages_input.value
     search_in_fields = search_in_fields_input.value
     query_operator = query_operator_input.value
@@ -64,9 +61,7 @@ def on_click(event):
         'Context ref': {'type': 'html'}
     }
 
-
     response_area.append(pn.widgets.Tabulator(iate_results, groupby=['Link'], show_index=False, formatters=html_columns,  layout='fit_columns', width=2000))
-
     response_area.append(pn.pane.Markdown("## Dictionaries"))
 
     combined_df = pd.concat([
@@ -87,10 +82,7 @@ def fetch_results(query, source_language, target_languages, num_pages, optional_
     iate_algus = time.time()
     iate_results = search_results_to_dataframe(query, source_language, target_languages, num_pages, optional_parameters)
     iate_lopp = time.time()
-
     print(f'Fetching IATE results took {iate_lopp - iate_algus:.2f} seconds')
-
-    print('')
 
     collins_algus = time.time()
     collins_english_results = entry_data_to_dataframe('english', query, 100, 1)
@@ -178,11 +170,5 @@ input_widgets = pn.WidgetBox(
     fetch_button
 )
 
-template = pn.template.BootstrapTemplate(
-    title='Search from IATE and dictionaries',
-    sidebar=[input_widgets],
-)
-
-template.main.append(response_area)
-
-template.servable()
+def api_view():
+    return pn.Column(input_widgets, response_area)

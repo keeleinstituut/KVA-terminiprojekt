@@ -1,10 +1,7 @@
 parsimine/data/
 parsimine/__pycache__
-apid/iate/.env
-apid/collins/.env
-apid/mw/.env
-apid/mw/__pycache__
-apid/collins/__pycache__
-apid/iate/__pycache__
-apid/.env
-apid/*.xlsx
+app/controllers/__pycache__
+app/views/__pycache__
+data/
+utils/__pycache__
+.env

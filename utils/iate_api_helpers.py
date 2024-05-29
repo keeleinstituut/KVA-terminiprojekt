@@ -1,9 +1,9 @@
+import os
 import time
 import json
 import requests
 import re
-from . import authentication_requests
-from . import iate_requests
+from app.controllers.iate_api_controllers import get_iate_tokens, perform_single_search, get_single_entity_by_href
 import pandas as pd
 
 
@@ -113,22 +113,25 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
     search_results_to_dataframe_algus = time.time()
 
     with requests.Session() as session:
-        tokens = authentication_requests.get_iate_tokens(session=session)
+        tokens = get_iate_tokens(session=session)
         access_token = tokens['tokens'][0]['access_token']
         results_list = []
 
         yhe_otsingu_algus = time.time()
-        results = iate_requests.perform_single_search(access_token, query, source_languages, target_languages, num_pages, session=session, **optional_parameters)
+        results = perform_single_search(access_token, query, source_languages, target_languages, num_pages, session=session, **optional_parameters)
         yhe_otsingu_lopp = time.time()
 
         print(f'perform_single_search võttis aega {yhe_otsingu_lopp - yhe_otsingu_algus:.2f} sekundit')
-        with open('apid/iate/data/domains.json', 'r', encoding='utf-8') as file:
+        script_dir = os.path.dirname(__file__)
+        data_path = os.path.join(script_dir, '..', 'data', 'domains.json')
+
+        with open(data_path, 'r', encoding='utf-8') as file:
             domains = json.load(file)
 
         for r in results:
             if 'self' in r:
                 single_entity_algus = time.time()
-                entry = iate_requests.get_single_entity_by_href(access_token, r['self']['href'], session=session)
+                entry = get_single_entity_by_href(access_token, r['self']['href'], session=session)
                 single_entity_lopp = time.time()
                 print(f'get_single_entity_by_href võttis aega {single_entity_lopp - single_entity_algus:.2f} sekundit')
                 processed_entries = process_entry(entry, domains, target_languages)
@@ -139,20 +142,6 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
     print(f'search_results_to_dataframe võttis aega {search_results_to_dataframe_lopp - search_results_to_dataframe_algus:.2f} sekundit')
 
     return pd.DataFrame(results_list)
-    
-
-def get_domain_name_by_code(data, domain_code):
-    def search_domain(domains):
-        for domain in domains:
-            if domain['code'] == domain_code:
-                return domain['name']
-            
-            if 'subdomains' in domain:
-                name = search_domain(domain['subdomains'])
-                if name:
-                    return name
-    
-    return search_domain(data['items']) or domain_code
 
 
 def get_domain_hierarchy_by_code(data, domain_code, hierarchy=None):

@@ -1,6 +1,6 @@
 from copy import deepcopy
 import pandas as pd
-from . import entries_requests
+from app.controllers.mw_api_controllers import get_data
 
 
 def refine_results(original_results):
@@ -22,7 +22,7 @@ def refine_results(original_results):
 
 
 def json_to_df_with_definitions_and_usages(query):
-    result = entries_requests.get_data(query, "collegiate")
+    result = get_data(query, "collegiate")
     refined_json = refine_results(result)
 
     rows = []

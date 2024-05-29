@@ -1,34 +1,6 @@
 import xml.etree.ElementTree as ET
 import pandas as pd
-from . import entries_requests
-
-
-def print_dictionary_titles(results):
-    for r in results:
-        print(r['dictionaryName'])
-
-
-def print_search_results(results):
-    if 'results' in results:
-        for r in results['results']:
-            print(r)
-
-
-def print_suggestions(results):
-    if 'suggestions' in results:
-        for s in results['suggestions']:
-            print(s)
-
-
-def print_entry_data(results):
-    if 'entryContent' in results:
-        root = ET.fromstring(results['entryContent'])
-        orth_value = root.find('.//orth').text
-        print(orth_value)
-        definitions = [def_elem.text for def_elem in root.findall('.//def')]
-
-        for i, definition in enumerate(definitions, 1):
-            print(f"{i}. {definition}")
+from app.controllers.collins_api_controllers import get_search_results, get_entry_by_entry_url
 
 
 def map_dict_names(code):
@@ -54,7 +26,7 @@ def get_all_text(element):
 
 # Collins English Dictionary
 def entry_data_to_dataframe(dict_code, search_word, page_size, page_index):
-    search_results = entries_requests.get_search_results(dict_code, search_word, page_size, page_index)
+    search_results = get_search_results(dict_code, search_word, page_size, page_index)
 
     data = []
 
@@ -62,7 +34,7 @@ def entry_data_to_dataframe(dict_code, search_word, page_size, page_index):
 
         for r in search_results['results']:
             url = r['entryUrl'] + '?format=xml'
-            result_data = entries_requests.get_entry_by_entry_url(url)
+            result_data = get_entry_by_entry_url(url)
             if 'entryContent' in result_data:
                 root = ET.fromstring(result_data['entryContent'])
                 orth_value = root.find('.//orth').text
@@ -85,13 +57,13 @@ def entry_data_to_dataframe(dict_code, search_word, page_size, page_index):
 # Collins Cobuild Advanced British
 # Collins Cobuild Advanced American
 def entry_cobuild_data_to_dataframe(dict_code, search_word, page_size, page_index):
-    search_results = entries_requests.get_search_results(dict_code, search_word, page_size, page_index)
+    search_results = get_search_results(dict_code, search_word, page_size, page_index)
     data = []
 
     if 'results' in search_results:
         for r in search_results['results']:
             url = r['entryUrl'] + '?format=xml'
-            result_data = entries_requests.get_entry_by_entry_url(url)
+            result_data = get_entry_by_entry_url(url)
             if 'entryContent' in result_data:
                 root = ET.fromstring(result_data['entryContent'])
                 headword = root.find('.//orth').text if root.find('.//orth') is not None else ''
