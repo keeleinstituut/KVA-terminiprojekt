@@ -16,7 +16,6 @@ css = """
 """
 pn.config.raw_css.append(css)
 
-
 def on_click(event):
     query = query_input.value
     source_language = source_language_input.value
@@ -26,14 +25,14 @@ def on_click(event):
     query_operator = query_operator_input.value
 
     if not query or not source_language or not target_languages or not search_in_fields:
-        response_area.append(pn.pane.Markdown("**Error**: All fields must be filled out"))
+        response_area.append(pn.pane.Markdown("**Viga**: Kõik väljad peavad olema täidetud"))
         return
 
     optional_parameters = {
         'query_operator': query_operator,
         'search_in_fields': search_in_fields
     }
-    
+
     fetch_algus = time.time()
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
@@ -46,23 +45,25 @@ def on_click(event):
     kuva_algus = time.time()
 
     response_area.clear()
-    response_area.append(pn.pane.Markdown("## IATE"))
 
     html_columns = {
         'Link': {'type': 'html'},
-        'Term ref': {'type': 'html'},
-        'Term note': {'type': 'html'},
-        'Term note ref': {'type': 'html'},
-        'Def': {'type': 'html'},
-        'Def ref': {'type': 'html'},
-        'Note': {'type': 'html'},
-        'Note ref': {'type': 'html'},
-        'Context': {'type': 'html'},
-        'Context ref': {'type': 'html'}
+        'Termini allikas': {'type': 'html'},
+        'Termini märkus': {'type': 'html'},
+        #'Term note ref': {'type': 'html'},
+        'Definitsioon': {'type': 'html'},
+        #'Def ref': {'type': 'html'},
+        'Märkus': {'type': 'html'},
+        #'Note ref': {'type': 'html'},
+        'Kontekst': {'type': 'html'},
+        #'Context ref': {'type': 'html'}
     }
 
-    response_area.append(pn.widgets.Tabulator(iate_results, groupby=['Link'], show_index=False, formatters=html_columns,  layout='fit_columns', width=2000))
-    response_area.append(pn.pane.Markdown("## Dictionaries"))
+    iate_tab = pn.Column(
+        pn.widgets.Tabulator(iate_results, groupby=['Link'], show_index=False, formatters=html_columns, layout='fit_columns', width=2000),
+        margin=(20, 0)
+
+    )
 
     combined_df = pd.concat([
         collins_english_results, 
@@ -71,12 +72,21 @@ def on_click(event):
         mw_dict_results
     ], ignore_index=True)
 
-    response_area.append(pn.widgets.Tabulator(combined_df, show_index=False, layout='fit_columns', width=2000))
+    dictionaries_tab = pn.Column(
+        pn.widgets.Tabulator(combined_df, show_index=False, layout='fit_columns', width=2000),
+        margin=(20, 0)
+    )
+
+    tabs = pn.Tabs(
+        ("IATE", iate_tab),
+        ("Sõnaraamatud", dictionaries_tab)
+    )
+
+    response_area.append(tabs)
 
     kuva_lopp = time.time()
 
     print(f'Kuvamine võttis aega: {kuva_lopp - kuva_algus:.2f}')
-
 
 def fetch_results(query, source_language, target_languages, num_pages, optional_parameters):
     iate_algus = time.time()
@@ -106,25 +116,27 @@ def fetch_results(query, source_language, target_languages, num_pages, optional_
 
     return iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results
 
-
-query_input = pn.widgets.TextInput(name='Query', placeholder='Enter search query here...', value='warfare')
+query_input = pn.widgets.TextInput(name='Otsisõna', placeholder='Trüki otsisõna siia', value='warfare', width=200)
 
 source_language_input = pn.widgets.Select(
-    name='Source Language', 
+    name='Lähtekeel', 
     options=['en', 'fr', 'de', 'et', 'ru', 'fi'], 
-    value='en'
+    value='en',
+    width=120
 )
 
 target_languages_input = pn.widgets.MultiChoice(
-    name='Target Languages', 
+    name='Sihtkeeled', 
     options=['en', 'fr', 'de', 'et', 'ru', 'fi'], 
-    value=['et']
+    value=['et'],
+    width=200
 )
 
-num_pages_input = pn.widgets.IntInput(name='Number of Pages', value=1, step=1)
+num_pages_input = pn.widgets.IntInput(name='Tulemuste lehekülgi', value=1, step=1, width=80)
+search_in_fields_label = pn.pane.Markdown("**Otsi väljadelt**", width=200)
 
 search_in_fields_input = pn.widgets.CheckBoxGroup(
-    name='Search In Fields',
+    name='Otsi väljadelt',
     value=[0],
     options={
         'Term entry def': 0,
@@ -138,6 +150,7 @@ search_in_fields_input = pn.widgets.CheckBoxGroup(
 
 query_operator_input = pn.widgets.Select(
     value=5,
+    name='Query operator',
     options={
         "Any Word": 0,
         "All Words": 1,
@@ -149,10 +162,11 @@ query_operator_input = pn.widgets.Select(
         "Not In": 7,
         "All": 8,
         "Is Empty": 9
-    }
+    },
+    width=150
 )
 
-fetch_button = pn.widgets.Button(name='Search', button_type='primary')
+fetch_button = pn.widgets.Button(name='Otsi', button_type='primary', width=100)
 
 response_area = pn.Column()
 
@@ -162,13 +176,17 @@ input_widgets = pn.WidgetBox(
     query_input,
     source_language_input,
     target_languages_input,
-    num_pages_input,
-    pn.pane.Markdown("**Search In Fields**"),
+    search_in_fields_label,
     search_in_fields_input,
-    pn.pane.Markdown("**Query Operator**"),
     query_operator_input,
-    fetch_button
+    num_pages_input,
+    fetch_button,
+    sizing_mode='stretch_width'
 )
 
+collapsible_input = pn.Card(input_widgets, title='Otsing', collapsible=True, collapsed=False, margin=(20, 0))
+
 def api_view():
-    return pn.Column(input_widgets, response_area)
+    return pn.Column(collapsible_input, response_area)
+
+api_view().servable()

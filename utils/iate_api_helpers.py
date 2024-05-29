@@ -33,10 +33,9 @@ def process_entry(entry, domains, target_languages):
                         term_references += tf['text']
                         term_references += '; '
                     term_refs = term_references.strip('; ')
-                    #cleaned_refs = [clean_term_source(item) for item in term_entry['term_references']]
-                    #term_refs = '; '.join(cleaned_refs).strip('; ')
                 
-                def_refs = ''
+                def_refs = ' — '
+                
                 if 'definition_references' in lang_data:
                     def_refs = lang_data['definition_references']
                     def_references = ''
@@ -50,7 +49,7 @@ def process_entry(entry, domains, target_languages):
                 if 'note' in lang_data:
                     note_texts += lang_data['note']['value']
 
-                note_refs = ''
+                note_refs = ' — '
 
                 if 'note_references' in lang_data:
                     for ref in lang_data['note_references']:
@@ -61,7 +60,7 @@ def process_entry(entry, domains, target_languages):
                 if 'note' in term_entry:
                     term_note_text += term_entry['note']['value']
 
-                term_note_references = ''
+                term_note_references = ' — '
 
                 if 'note_references' in term_entry:
                     for ref in term_entry['note_references']:
@@ -73,7 +72,7 @@ def process_entry(entry, domains, target_languages):
                     for c in term_entry['contexts']:
                         context_texts += c['context']
 
-                context_refs = ''
+                context_refs = ' — '
 
                 if 'contexts' in term_entry:
                     for c in term_entry['contexts']:
@@ -88,20 +87,20 @@ def process_entry(entry, domains, target_languages):
                 processed_entry = {
                     'Link': '<a href="https://iate.europa.eu/entry/result/' + str(entry['id']) + '">' + str(entry['id']) + '</a>',
                     #'ID': str(entry['id']),
-                    'Added': creation_time,
-                    'Modified': modification_time,
-                    'Domain': domain_hierarchy_str,
-                    'Lang': tl.upper(),
-                    'Term': term_entry['term_value'],
-                    'Term ref': term_refs,
-                    'Term note': term_note_text,
-                    'Term note ref': term_note_references,
-                    'Def': definition_with_link,
-                    'Def ref': def_refs,
-                    'Note': note_texts,
-                    'Note ref': note_refs,
-                    'Context': context_texts,
-                    'Context ref': context_refs
+                    'Lisatud': creation_time,
+                    'Muudetud': modification_time,
+                    'Valdkond': domain_hierarchy_str,
+                    'Keel': tl.upper(),
+                    'Termin': term_entry['term_value'],
+                    'Termini allikas': term_refs,
+                    'Termini märkus': term_note_text + term_note_references,
+                    #'Term note ref': term_note_references,
+                    'Definitsioon': definition_with_link + def_refs,
+                    #'Def ref': def_refs,
+                    'Märkus': note_texts + note_refs,
+                    #'Note ref': note_refs,
+                    'Kontekst': context_texts + context_refs,
+                    #'Context ref': context_refs
                     }
                 
                 processed_entries.append(processed_entry)
@@ -134,7 +133,11 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
                 entry = get_single_entity_by_href(access_token, r['self']['href'], session=session)
                 single_entity_lopp = time.time()
                 print(f'get_single_entity_by_href võttis aega {single_entity_lopp - single_entity_algus:.2f} sekundit')
+
+                process_algus = time.time()
                 processed_entries = process_entry(entry, domains, target_languages)
+                process_lopp = time.time()
+                print(f'process_entry võttis aega {process_lopp - process_algus:.2f} sekundit' )
                 results_list.extend(processed_entries)
 
     search_results_to_dataframe_lopp = time.time()
