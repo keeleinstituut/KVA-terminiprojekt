@@ -2,10 +2,11 @@ import os
 import time
 import json
 import requests
-import re
-from app.controllers.iate_api_controllers import get_iate_tokens, perform_single_search, get_single_entity_by_href
+from app.controllers.iate_api_controllers import perform_single_search, get_single_entity_by_href
+from app.controllers.token_controller import TokenController
 import pandas as pd
 
+token_controller = TokenController()
 
 def process_entry(entry, domains, target_languages):
     processed_entries = []
@@ -16,7 +17,6 @@ def process_entry(entry, domains, target_languages):
     domain_hierarchy_str = "; ".join(domain_hierarchy)
 
     for tl in target_languages:
-
         if tl in entry['language']:
             lang_data = entry['language'][tl]
             term_entries = lang_data.get('term_entries', [])
@@ -29,7 +29,7 @@ def process_entry(entry, domains, target_languages):
                 if 'term_references' in term_entry:
                     term_refs = term_entry['term_references']
                     term_references = ''
-                    for tf in term_refs: 
+                    for tf in term_refs:
                         term_references += tf['text']
                         term_references += '; '
                     term_refs = term_references.strip('; ')
@@ -39,7 +39,7 @@ def process_entry(entry, domains, target_languages):
                 if 'definition_references' in lang_data:
                     def_refs = lang_data['definition_references']
                     def_references = ''
-                    for df in def_refs: 
+                    for df in def_refs:
                         def_references += df['text']
                         def_references += '; '
                     def_refs = def_references.strip('; ')
@@ -86,7 +86,6 @@ def process_entry(entry, domains, target_languages):
 
                 processed_entry = {
                     'Link': '<a href="https://iate.europa.eu/entry/result/' + str(entry['id']) + '">' + str(entry['id']) + '</a>',
-                    #'ID': str(entry['id']),
                     'Lisatud': creation_time,
                     'Muudetud': modification_time,
                     'Valdkond': domain_hierarchy_str,
@@ -94,26 +93,20 @@ def process_entry(entry, domains, target_languages):
                     'Termin': term_entry['term_value'],
                     'Termini allikas': term_refs,
                     'Termini märkus': term_note_text + term_note_references,
-                    #'Term note ref': term_note_references,
                     'Definitsioon': definition_with_link + def_refs,
-                    #'Def ref': def_refs,
                     'Märkus': note_texts + note_refs,
-                    #'Note ref': note_refs,
                     'Kontekst': context_texts + context_refs,
-                    #'Context ref': context_refs
-                    }
+                }
                 
                 processed_entries.append(processed_entry)
 
     return processed_entries
 
-
 def search_results_to_dataframe(query, source_languages, target_languages, num_pages, optional_parameters):
     search_results_to_dataframe_algus = time.time()
 
     with requests.Session() as session:
-        tokens = get_iate_tokens(session=session)
-        access_token = tokens['tokens'][0]['access_token']
+        access_token = token_controller.get_access_token()
         results_list = []
 
         yhe_otsingu_algus = time.time()
@@ -145,7 +138,6 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
     print(f'search_results_to_dataframe võttis aega {search_results_to_dataframe_lopp - search_results_to_dataframe_algus:.2f} sekundit')
 
     return pd.DataFrame(results_list)
-
 
 def get_domain_hierarchy_by_code(data, domain_code, hierarchy=None):
     if hierarchy is None:

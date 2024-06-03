@@ -37,7 +37,7 @@ def on_click(event):
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
         query, source_language, target_languages, num_pages, optional_parameters)
-    
+        
     fetch_lopp = time.time()
 
     print(f'Fetching results took {fetch_lopp - fetch_algus:.2f} seconds')
