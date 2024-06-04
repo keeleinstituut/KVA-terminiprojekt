@@ -20,7 +20,8 @@ def on_click(event):
     query = query_input.value
     source_language = source_language_input.value
     target_languages = target_languages_input.value
-    num_pages = num_pages_input.value
+    #num_pages = num_pages_input.value
+    num_pages=1
     search_in_fields = search_in_fields_input.value
     query_operator = query_operator_input.value
 
@@ -110,36 +111,36 @@ target_languages_input = pn.widgets.MultiChoice(
     width=200
 )
 
-num_pages_input = pn.widgets.IntInput(name='Tulemuste lehekülgi', value=1, step=1, width=80)
+#num_pages_input = pn.widgets.IntInput(name='Tulemuste lehekülgi', value=1, step=1, width=80)
 search_in_fields_label = pn.pane.Markdown("**Otsi väljadelt**", width=200)
 
 search_in_fields_input = pn.widgets.CheckBoxGroup(
     name='Otsi väljadelt',
     value=[0],
     options={
-        'Term entry def': 0,
-        'Term entry note': 2,
-        'Term entry context': 3,
-        'Language entry note': 7,
-        'Entry code': 8,
-        'Entry id': 9
+        'Termin': 0,
+        'Termini märkus': 2,
+        'Termini kasutusnäide': 3,
+        'Keele tasandi märkus': 7
+        #'Entry code': 8,
+        #'Entry id': 9
     }
 )
 
 query_operator_input = pn.widgets.Select(
     value=5,
-    name='Query operator',
+    name='Otsingu täpsus',
     options={
-        "Any Word": 0,
-        "All Words": 1,
-        "Exact String": 2,
-        "Exact Match": 3,
+        #"Any Word": 0,
+        "Kõik sõnad": 1,
+        #"Exact String": 2,
+        "Täpne vaste": 3,
         #"Regular Expression": 4,
-        "Partial String": 5,
-        "In": 6,
-        "Not In": 7,
-        "All": 8,
-        "Is Empty": 9
+        "Osaline vaste": 5
+        #"In": 6,
+        #"Not In": 7,
+        #"All": 8,
+        #"Is Empty": 9
     },
     width=150
 )
@@ -157,7 +158,7 @@ input_widgets = pn.WidgetBox(
     search_in_fields_label,
     search_in_fields_input,
     query_operator_input,
-    num_pages_input,
+    #num_pages_input,
     fetch_button,
     sizing_mode='stretch_width'
 )
