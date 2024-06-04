@@ -1,40 +1,22 @@
 import sys
 import os
-import logging
 import panel as pn
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from app.views.api_view import api_view
 from app.views.file_upload import file_upload
 
-#logging.basicConfig(level=logging.DEBUG)
+file_upload_area = pn.Column(file_upload())
+api_view_area = pn.Column(api_view())
 
-def create_main_area(content):
-    return pn.Column(content)
-
-def show_api_view(event):
-    main_area.clear()
-    main_area.append(api_view())
-
-def show_file_upload(event):
-    main_area.clear()
-    main_area.append(file_upload())
-
-main_area = pn.Column(pn.pane.Markdown("Vali menüüst lehekülg."))
-
-sidebar_content = pn.Column(
-    pn.widgets.Button(name='API päringud', button_type='default'),
-    pn.widgets.Button(name='Failide üles laadimine', button_type='default'),
+tabs = pn.Tabs(
+    ('Failide üles laadimine', file_upload_area),
+    ('API päringud', api_view_area),
 )
-
-sidebar_content[0].on_click(show_api_view)
-sidebar_content[1].on_click(show_file_upload)
 
 template = pn.template.VanillaTemplate(
     title="Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas",
-    sidebar=[sidebar_content],
-    main=[main_area],
+    main=[tabs],
     sidebar_width=300
 )
 
