@@ -1,6 +1,6 @@
 CREATE TYPE document_state AS ENUM ('processing', 'uploaded', 'failed');
 
-CREATE TABLE document(
+CREATE TABLE documents(
     id serial PRIMARY KEY,
     pdf_filename VARCHAR(255) NOT NULL,
     json_filename VARCHAR(255) NOT NULL,
@@ -17,7 +17,7 @@ CREATE TABLE document(
     UNIQUE (pdf_filename, json_filename)
 );
 
-CREATE TABLE keyword(
+CREATE TABLE keywords(
     id serial PRIMARY KEY,
     keyword VARCHAR(255) NOT NULL UNIQUE,
     pdf_filename VARCHAR(255) NOT NULL
