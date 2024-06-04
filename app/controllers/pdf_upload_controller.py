@@ -138,7 +138,7 @@ def file_exists_in_collection(con, filename: str):
 
 def upload_to_db(input_pdf, pdf_meta):
     # Parsing arguments
-    config_file = '/home/sandra/git/KVA-terminiprojekt/app/config.json'
+    config_file = 'C:\\Users\\sandra.eiche\\Documents\\git\\KVA-terminiprojekt\\app\\config.json'
 
     try:
         if not os.path.isfile(config_file):
@@ -253,7 +253,7 @@ def upload_to_db(input_pdf, pdf_meta):
             'current_state': 'processing'}])
 
         # Keywords entry
-        kw_query = f""" INSERT INTO keyword (keyword, document_id) VALUES (:kw, :fname) """
+        kw_query = f""" INSERT INTO keywords (keyword, document_id) VALUES (:kw, :fname) """
         kw_data = [{'kw': kw, 'fname': metadata['filename']} for kw in metadata['field_keywords']]
         con.execute_sql(kw_query, kw_data)
     except Exception as e:
@@ -301,18 +301,10 @@ def upload_to_db(input_pdf, pdf_meta):
         
     logger.info(f'{len(section_points)} chunks added to database')
 
-    try:
-        con.execute(
-            """UPDATE documents
-            SET state = 'uploaded'
-            WHERE filename = :fname""",
-            [{'fname': metadata['filename']}]
-        )
-        pg_connection.commit()
+    con.execute(
+        """UPDATE documents
+        SET state = 'uploaded'
+        WHERE filename = :fname""",
+        [{'fname': metadata['filename']}]
+    )
 
-    except Exception as e:
-        pg_connection.rollback()
-        logger.error(f"An error occurred: {e}")
-    finally:
-        cur.close()
-        pg_connection.close()
