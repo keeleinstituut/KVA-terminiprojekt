@@ -109,11 +109,8 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
         access_token = token_controller.get_access_token()
         results_list = []
 
-        yhe_otsingu_algus = time.time()
         results = perform_single_search(access_token, query, source_languages, target_languages, num_pages, session=session, **optional_parameters)
-        yhe_otsingu_lopp = time.time()
 
-        print(f'perform_single_search võttis aega {yhe_otsingu_lopp - yhe_otsingu_algus:.2f} sekundit')
         script_dir = os.path.dirname(__file__)
         data_path = os.path.join(script_dir, '..', 'data', 'domains.json')
 
@@ -122,20 +119,12 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
 
         for r in results:
             if 'self' in r:
-                single_entity_algus = time.time()
                 entry = get_single_entity_by_href(access_token, r['self']['href'], session=session)
-                single_entity_lopp = time.time()
-                print(f'get_single_entity_by_href võttis aega {single_entity_lopp - single_entity_algus:.2f} sekundit')
 
-                process_algus = time.time()
                 processed_entries = process_entry(entry, domains, target_languages)
-                process_lopp = time.time()
-                print(f'process_entry võttis aega {process_lopp - process_algus:.2f} sekundit' )
                 results_list.extend(processed_entries)
 
     search_results_to_dataframe_lopp = time.time()
-
-    print(f'search_results_to_dataframe võttis aega {search_results_to_dataframe_lopp - search_results_to_dataframe_algus:.2f} sekundit')
 
     return pd.DataFrame(results_list)
 

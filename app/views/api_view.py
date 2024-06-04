@@ -33,17 +33,9 @@ def on_click(event):
         'search_in_fields': search_in_fields
     }
 
-    fetch_algus = time.time()
-
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
         query, source_language, target_languages, num_pages, optional_parameters)
         
-    fetch_lopp = time.time()
-
-    print(f'Fetching results took {fetch_lopp - fetch_algus:.2f} seconds')
-
-    kuva_algus = time.time()
-
     response_area.clear()
 
     html_columns = {
@@ -72,8 +64,12 @@ def on_click(event):
         mw_dict_results
     ], ignore_index=True)
 
+    dict_html_columns = {
+        'Keelend': {'type': 'html'},
+    }
+
     dictionaries_tab = pn.Column(
-        pn.widgets.Tabulator(combined_df, show_index=False, layout='fit_columns', width=2000),
+        pn.widgets.Tabulator(combined_df, formatters=dict_html_columns, show_index=False, layout='fit_columns', width=2000),
         margin=(20, 0)
     )
 
@@ -84,35 +80,17 @@ def on_click(event):
 
     response_area.append(tabs)
 
-    kuva_lopp = time.time()
-
-    print(f'Kuvamine võttis aega: {kuva_lopp - kuva_algus:.2f}')
 
 def fetch_results(query, source_language, target_languages, num_pages, optional_parameters):
-    iate_algus = time.time()
     iate_results = search_results_to_dataframe(query, source_language, target_languages, num_pages, optional_parameters)
-    iate_lopp = time.time()
-    print(f'Fetching IATE results took {iate_lopp - iate_algus:.2f} seconds')
 
-    collins_algus = time.time()
     collins_english_results = entry_data_to_dataframe('english', query, 100, 1)
-    collins_lopp = time.time()
-    print(f'Fetching Collins English results took {collins_lopp - collins_algus:.2f} seconds')
 
-    collins_algus_2 = time.time()
     collins_cobuild_advanced_british_results = entry_cobuild_data_to_dataframe('english-learner', query, 100, 1)
-    collins_lopp_2 = time.time()
-    print(f'Fetching Collins Adv Br results took {collins_lopp_2 - collins_algus_2:.2f} seconds')
 
-    collins_cob_am_algus = time.time()
     collins_cobuild_advanced_american_results = entry_cobuild_data_to_dataframe('american-learner', query, 100, 1)
-    collins_cob_am_lopp = time.time()
-    print(f'Fetching Collins Cobuild American results took {collins_cob_am_lopp - collins_cob_am_algus:.2f} seconds')
 
-    mw_algus = time.time()
     mw_dict_results = json_to_df_with_definitions_and_usages(query)
-    mw_lopp = time.time()
-    print(f'Fetching MW results took {mw_lopp - mw_algus:.2f} seconds')
 
     return iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results
 

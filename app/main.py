@@ -1,18 +1,17 @@
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import logging
 import panel as pn
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from app.views.api_view import api_view
 from app.views.file_upload import file_upload
 
-pn.extension()
+#logging.basicConfig(level=logging.DEBUG)
 
-main_area = pn.Column(pn.pane.Markdown("Vali menüüst lehekülg."))
-
-sidebar_content = pn.Column(
-    pn.widgets.Button(name='API päringud', button_type='default'),
-    pn.widgets.Button(name='Failide üles laadimine', button_type='default'),
-)
+def create_main_area(content):
+    return pn.Column(content)
 
 def show_api_view(event):
     main_area.clear()
@@ -21,6 +20,13 @@ def show_api_view(event):
 def show_file_upload(event):
     main_area.clear()
     main_area.append(file_upload())
+
+main_area = pn.Column(pn.pane.Markdown("Vali menüüst lehekülg."))
+
+sidebar_content = pn.Column(
+    pn.widgets.Button(name='API päringud', button_type='default'),
+    pn.widgets.Button(name='Failide üles laadimine', button_type='default'),
+)
 
 sidebar_content[0].on_click(show_api_view)
 sidebar_content[1].on_click(show_file_upload)

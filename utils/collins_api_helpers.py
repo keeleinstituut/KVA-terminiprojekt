@@ -43,7 +43,7 @@ def entry_data_to_dataframe(dict_code, search_word, page_size, page_index):
                 for definition in definitions:
                     data.append({
                         'Allikas': map_dict_names(dict_code),
-                        'Keelend': orth_value, 
+                        'Keelend': '<a href="https://www.collinsdictionary.com/dictionary/english/' + orth_value.replace(' ', '-') + '"  target="_blank">' + orth_value + '</a>', 
                         'Definitsioon': definition,
                         'Lühike definitsioon': None,
                         'Näide': None
@@ -77,7 +77,7 @@ def entry_cobuild_data_to_dataframe(dict_code, search_word, page_size, page_inde
 
                         data.append({
                             'Allikas': map_dict_names(dict_code),
-                            'Keelend': headword,
+                            'Keelend': '<a href="https://www.collinsdictionary.com/dictionary/english/' + headword.replace(' ', '-') + '"  target="_blank">' + headword + '</a>', 
                             'Definitsioon': definition_text,
                             'Lühike definitsioon': None,
                             'Näide': ' '.join(example_texts)

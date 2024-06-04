@@ -2,6 +2,9 @@ import collections
 import param
 import panel as pn
 import json
+import logging
+
+#logging.basicConfig(level=logging.DEBUG)
 
 BUTTON_WIDTH = 125
 
