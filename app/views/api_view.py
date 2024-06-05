@@ -114,9 +114,17 @@ target_languages_input = pn.widgets.MultiChoice(
 #num_pages_input = pn.widgets.IntInput(name='Tulemuste lehekülgi', value=1, step=1, width=80)
 search_in_fields_label = pn.pane.Markdown("**Otsi väljadelt**", width=200)
 
+
+# External logged in users can search in: Term, Term note, Term in context, Language level note
+#
+# "Term Entry Def": 0,
+# "Term Entry Note": 2,
+# "Term Entry Context": 3,
+# "Language Entry Note": 7
+
 search_in_fields_input = pn.widgets.CheckBoxGroup(
     name='Otsi väljadelt',
-    value=[0],
+    value=[0, 2, 7],
     options={
         'Termin': 0,
         'Termini märkus': 2,
@@ -127,13 +135,54 @@ search_in_fields_input = pn.widgets.CheckBoxGroup(
     }
 )
 
+# IATE Matching options: https://handbook.iate2.eu/iate-search/main-search/expanded-search/matching-options/
+# ‘All words’ is the default option and retrieves terms which contain all of the words in the search field.
+#
+# ‘Exact match’ retrieves terms which match the query exactly. By default, search strings containing characters 
+#   with diacritic marks will retrieve the diacritic characters and the base characters as exact matches.
+#
+# ‘Exact string’ retrieves results which contain the search query exactly as it is, with full words. Results 
+#   may contain additional words before or after the search string.
+#
+# ‘Partial string’ retrieves results containing the search string within a longer string. The string doesn’t 
+#   need to be full words. For example, searching for ‘book’ will retrieve ֥‘book’, but also ‘e-book’, ‘booking’, 
+#   ‘notebook’, etc. (i.e. results which contain ‘book’ inside a longer string). This matching option is the 
+#   only one possible when searching in fields other than the Term field.
+#
+# If you select ‘Any word’, results matching any one of the words in the search string will be displayed below 
+# the more relevant results (e.g. if you search for ‘European Commission’ with ‘Any wordְ’ selected, 
+# ‘European citizen’ would be displayed below the ‘all words’ results listed above).
+#
+# ‘Regular expression’ allows advanced users to run more complex searches using these patterns:
+#    https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-regexp-query.html.
+#
+# "Any word": 0,
+# "All words": 1,
+# "Exact String": 2,
+# "Exact Match": 3,
+# "Regular Expression": 4,
+# "Partial String": 5,
+# "In": 6,
+# "Not In": 7,
+# "All": 8,
+# "Is Empty": 9,
+# "Is Not Empty": 10,
+# "Gt": 11,
+# "Gte": 12,
+# "Lt": 13,
+# "Lte": 14,
+# "Equals": 15,
+# "Between": 16,
+# "Only": 17,
+# "Light Any Word": 18,
+ 
 query_operator_input = pn.widgets.Select(
-    value=5,
+    value=2,
     name='Otsingu täpsus',
     options={
         #"Any Word": 0,
         "Kõik sõnad": 1,
-        #"Exact String": 2,
+        "Exact String": 2,
         "Täpne vaste": 3,
         #"Regular Expression": 4,
         "Osaline vaste": 5

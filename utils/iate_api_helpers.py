@@ -109,7 +109,7 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
         access_token = token_controller.get_access_token()
         results_list = []
 
-        results = perform_single_search(access_token, query, source_languages, target_languages, num_pages, session=session, **optional_parameters)
+        results = perform_single_search(access_token, query, source_languages, target_languages, session=session, **optional_parameters)
 
         script_dir = os.path.dirname(__file__)
         data_path = os.path.join(script_dir, '..', 'data', 'domains.json')

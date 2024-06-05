@@ -4,7 +4,7 @@ from .token_controller import TokenController
 
 token_controller = TokenController()
 
-def perform_single_search(access_token, query, source, targets, num_pages=5, session=None, **kwargs):
+def perform_single_search(access_token, query, source, targets, session=None, **kwargs):
     url = "https://iate.europa.eu/em-api/entries/_search"
 
     headers = {
@@ -13,28 +13,24 @@ def perform_single_search(access_token, query, source, targets, num_pages=5, ses
         'Authorization': f'Bearer {access_token}'
     }
 
-    limit = kwargs.pop('limit', 100)
-    offset = kwargs.pop('offset', 0)
-
     all_results = []
+    current_url = url
 
-    for _ in range(num_pages):
+    while current_url:
         search_request = {
             "query": query,
             "source": source,
             "targets": targets,
-            "offset": offset,
-            "limit": limit,
-            "fields_set_name": "minimal", 
-            **kwargs           
+            "fields_set_name": "minimal",
+            **kwargs
         }
 
         json_payload = json.dumps(search_request)
 
         if session:
-            response = session.post(url, headers=headers, data=json_payload)
+            response = session.post(current_url, headers=headers, data=json_payload)
         else:
-            response = requests.post(url, headers=headers, data=json_payload)
+            response = requests.post(current_url, headers=headers, data=json_payload)
 
         if response.status_code != 200:
             return {'error': 'Failed to perform search', 'details': response.text}
@@ -48,10 +44,15 @@ def perform_single_search(access_token, query, source, targets, num_pages=5, ses
 
         all_results.extend(items)
 
-        if len(items) < limit:
+        #print(f"Batch size: {len(items)}, Total fetched so far: {len(all_results)}")
+
+        next_link = data.get('next', {}).get('href')
+        if not next_link:
             break
 
-        offset += limit
+        current_url = next_link
+
+    #print(f"Total size: {len(all_results)}")
 
     return all_results
 
