@@ -43,19 +43,20 @@ def on_click(event):
         'Link': {'type': 'html'},
         'Termini allikas': {'type': 'html'},
         'Termini märkus': {'type': 'html'},
-        #'Term note ref': {'type': 'html'},
         'Definitsioon': {'type': 'html'},
-        #'Def ref': {'type': 'html'},
         'Märkus': {'type': 'html'},
-        #'Note ref': {'type': 'html'},
-        'Kontekst': {'type': 'html'},
-        #'Context ref': {'type': 'html'}
+        'Kontekst': {'type': 'html'}
+    }
+
+    tabulator_editors = {
+        # 'float': {'type': 'number', 'max': 10, 'step': 0.1},
+        # 'bool': {'type': 'tickCross', 'tristate': True, 'indeterminateValue': None},
+        'str': {'type': 'list', 'valuesLookup': True},
     }
 
     iate_tab = pn.Column(
-        pn.widgets.Tabulator(iate_results, groupby=['Link'], show_index=False, formatters=html_columns, layout='fit_columns', width=2000),
+        pn.widgets.Tabulator(iate_results, groupby=['Link'], show_index=False, formatters=html_columns, layout='fit_columns', width=2000, editors=tabulator_editors, header_filters=True),
         margin=(20, 0)
-
     )
 
     combined_df = pd.concat([
@@ -70,7 +71,7 @@ def on_click(event):
     }
 
     dictionaries_tab = pn.Column(
-        pn.widgets.Tabulator(combined_df, formatters=dict_html_columns, show_index=False, layout='fit_columns', width=2000),
+        pn.widgets.Tabulator(combined_df, formatters=dict_html_columns, show_index=False, editors=tabulator_editors, layout='fit_columns', header_filters=True, width=2000),
         margin=(20, 0)
     )
 
@@ -80,7 +81,6 @@ def on_click(event):
     )
 
     response_area.append(tabs)
-
 
 def fetch_results(query, source_language, target_languages, num_pages, optional_parameters):
     iate_results = search_results_to_dataframe(query, source_language, target_languages, num_pages, optional_parameters)
@@ -111,16 +111,7 @@ target_languages_input = pn.widgets.MultiChoice(
     width=200
 )
 
-#num_pages_input = pn.widgets.IntInput(name='Tulemuste lehekülgi', value=1, step=1, width=80)
 search_in_fields_label = pn.pane.Markdown("**Otsi väljadelt**", width=200)
-
-
-# External logged in users can search in: Term, Term note, Term in context, Language level note
-#
-# "Term Entry Def": 0,
-# "Term Entry Note": 2,
-# "Term Entry Context": 3,
-# "Language Entry Note": 7
 
 search_in_fields_input = pn.widgets.CheckBoxGroup(
     name='Otsi väljadelt',
@@ -130,66 +121,17 @@ search_in_fields_input = pn.widgets.CheckBoxGroup(
         'Termini märkus': 2,
         'Termini kasutusnäide': 3,
         'Keele tasandi märkus': 7
-        #'Entry code': 8,
-        #'Entry id': 9
     }
 )
 
-# IATE Matching options: https://handbook.iate2.eu/iate-search/main-search/expanded-search/matching-options/
-# ‘All words’ is the default option and retrieves terms which contain all of the words in the search field.
-#
-# ‘Exact match’ retrieves terms which match the query exactly. By default, search strings containing characters 
-#   with diacritic marks will retrieve the diacritic characters and the base characters as exact matches.
-#
-# ‘Exact string’ retrieves results which contain the search query exactly as it is, with full words. Results 
-#   may contain additional words before or after the search string.
-#
-# ‘Partial string’ retrieves results containing the search string within a longer string. The string doesn’t 
-#   need to be full words. For example, searching for ‘book’ will retrieve ֥‘book’, but also ‘e-book’, ‘booking’, 
-#   ‘notebook’, etc. (i.e. results which contain ‘book’ inside a longer string). This matching option is the 
-#   only one possible when searching in fields other than the Term field.
-#
-# If you select ‘Any word’, results matching any one of the words in the search string will be displayed below 
-# the more relevant results (e.g. if you search for ‘European Commission’ with ‘Any wordְ’ selected, 
-# ‘European citizen’ would be displayed below the ‘all words’ results listed above).
-#
-# ‘Regular expression’ allows advanced users to run more complex searches using these patterns:
-#    https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-regexp-query.html.
-#
-# "Any word": 0,
-# "All words": 1,
-# "Exact String": 2,
-# "Exact Match": 3,
-# "Regular Expression": 4,
-# "Partial String": 5,
-# "In": 6,
-# "Not In": 7,
-# "All": 8,
-# "Is Empty": 9,
-# "Is Not Empty": 10,
-# "Gt": 11,
-# "Gte": 12,
-# "Lt": 13,
-# "Lte": 14,
-# "Equals": 15,
-# "Between": 16,
-# "Only": 17,
-# "Light Any Word": 18,
- 
 query_operator_input = pn.widgets.Select(
     value=2,
     name='Otsingu täpsus',
     options={
-        #"Any Word": 0,
         "Kõik sõnad": 1,
         "Exact String": 2,
         "Täpne vaste": 3,
-        #"Regular Expression": 4,
         "Osaline vaste": 5
-        #"In": 6,
-        #"Not In": 7,
-        #"All": 8,
-        #"Is Empty": 9
     },
     width=150
 )
@@ -207,7 +149,6 @@ input_widgets = pn.WidgetBox(
     search_in_fields_label,
     search_in_fields_input,
     query_operator_input,
-    #num_pages_input,
     fetch_button,
     sizing_mode='stretch_width'
 )
