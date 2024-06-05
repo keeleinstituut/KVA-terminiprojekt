@@ -20,7 +20,6 @@ def on_click(event):
     query = query_input.value
     source_language = source_language_input.value
     target_languages = target_languages_input.value
-    #num_pages = num_pages_input.value
     num_pages=1
     search_in_fields = search_in_fields_input.value
     query_operator = query_operator_input.value
@@ -55,7 +54,26 @@ def on_click(event):
     }
 
     iate_tab = pn.Column(
-        pn.widgets.Tabulator(iate_results, groupby=['Link'], show_index=False, formatters=html_columns, layout='fit_columns', width=2000, editors=tabulator_editors, header_filters=True),
+        pn.widgets.Tabulator(iate_results, 
+                             groupby=['Link'], 
+                             show_index=False, 
+                             formatters=html_columns, 
+                             layout='fit_columns', 
+                             widths={
+                                     'Link': '75', 
+                                     'Lisatud': '100', 
+                                     'Muudetud': '100', 
+                                     'Valdkond': '125', 
+                                     'Keel': '50', 
+                                     'Termin': '200', 
+                                     'Termini allikas': '300', 
+                                     'Termini märkus': '200',
+                                     'Definitsioon': '400',
+                                     'Märkus': '200',
+                                     'Kontekst': '300'
+                                     },
+                             editors=tabulator_editors, 
+                             header_filters=True),
         margin=(20, 0)
     )
 
@@ -71,7 +89,14 @@ def on_click(event):
     }
 
     dictionaries_tab = pn.Column(
-        pn.widgets.Tabulator(combined_df, formatters=dict_html_columns, show_index=False, editors=tabulator_editors, layout='fit_columns', header_filters=True, width=2000),
+        pn.widgets.Tabulator(combined_df, 
+                             formatters=dict_html_columns, 
+                             show_index=False, 
+                             editors=tabulator_editors,
+                             #sizing_mode='stretch_width', 
+                             layout='fit_columns',
+                             widths={'Allikas': '250', 'Keelend': '150', 'Definitsioon': '600', 'Lühike definitsioon': '500', 'Näide': '600'},
+                             header_filters=True),
         margin=(20, 0)
     )
 
