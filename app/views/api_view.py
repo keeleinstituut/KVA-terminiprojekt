@@ -20,9 +20,9 @@ def on_click(event):
     query = query_input.value
     source_language = source_language_input.value
     target_languages = target_languages_input.value
-    num_pages=1
     search_in_fields = search_in_fields_input.value
     query_operator = query_operator_input.value
+    only_first_batch_value = only_first_batch_checkbox.value
 
     if not query or not source_language or not target_languages or not search_in_fields:
         response_area.append(pn.pane.Markdown("**Viga**: Kõik väljad peavad olema täidetud"))
@@ -34,7 +34,7 @@ def on_click(event):
     }
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
-        query, source_language, target_languages, num_pages, optional_parameters)
+        query, source_language, target_languages, only_first_batch_value, optional_parameters)
         
     response_area.clear()
 
@@ -48,8 +48,6 @@ def on_click(event):
     }
 
     tabulator_editors = {
-        # 'float': {'type': 'number', 'max': 10, 'step': 0.1},
-        # 'bool': {'type': 'tickCross', 'tristate': True, 'indeterminateValue': None},
         'str': {'type': 'list', 'valuesLookup': True},
     }
 
@@ -93,7 +91,6 @@ def on_click(event):
                              formatters=dict_html_columns, 
                              show_index=False, 
                              editors=tabulator_editors,
-                             #sizing_mode='stretch_width', 
                              layout='fit_columns',
                              widths={'Allikas': '250', 'Keelend': '150', 'Definitsioon': '600', 'Lühike definitsioon': '500', 'Näide': '600'},
                              header_filters=True),
@@ -107,8 +104,8 @@ def on_click(event):
 
     response_area.append(tabs)
 
-def fetch_results(query, source_language, target_languages, num_pages, optional_parameters):
-    iate_results = search_results_to_dataframe(query, source_language, target_languages, num_pages, optional_parameters)
+def fetch_results(query, source_language, target_languages, only_first_batch, optional_parameters):
+    iate_results = search_results_to_dataframe(query, source_language, target_languages, only_first_batch, optional_parameters)
 
     collins_english_results = entry_data_to_dataframe('english', query, 100, 1)
 
@@ -120,7 +117,7 @@ def fetch_results(query, source_language, target_languages, num_pages, optional_
 
     return iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results
 
-query_input = pn.widgets.TextInput(name='Otsisõna', placeholder='Trüki otsisõna siia', value='warfare', width=200)
+query_input = pn.widgets.TextInput(name='Otsisõna', placeholder='Trüki otsisõna siia', value='reconnaissance', width=200)
 
 source_language_input = pn.widgets.Select(
     name='Lähtekeel', 
@@ -132,15 +129,22 @@ source_language_input = pn.widgets.Select(
 target_languages_input = pn.widgets.MultiChoice(
     name='Sihtkeeled', 
     options=['en', 'fr', 'de', 'et', 'ru', 'fi'], 
-    value=['et'],
+    value=['et', 'en'],
     width=200
 )
 
 search_in_fields_label = pn.pane.Markdown("**Otsi väljadelt**", width=200)
 
+# External logged in users can search in: Term, Term note, Term in context, Language level note
+#
+# "Term Entry Def": 0,
+# "Term Entry Note": 2,
+# "Term Entry Context": 3,
+# "Language Entry Note": 7
+
 search_in_fields_input = pn.widgets.CheckBoxGroup(
     name='Otsi väljadelt',
-    value=[0, 2, 7],
+    value=[0],
     options={
         'Termin': 0,
         'Termini märkus': 2,
@@ -149,17 +153,64 @@ search_in_fields_input = pn.widgets.CheckBoxGroup(
     }
 )
 
+# IATE Matching options: https://handbook.iate2.eu/iate-search/main-search/expanded-search/matching-options/
+# ‘All words’ is the default option and retrieves terms which contain all of the words in the search field.
+#
+# ‘Exact match’ retrieves terms which match the query exactly. By default, search strings containing characters 
+#   with diacritic marks will retrieve the diacritic characters and the base characters as exact matches.
+#
+# ‘Exact string’ retrieves results which contain the search query exactly as it is, with full words. Results 
+#   may contain additional words before or after the search string.
+#
+# ‘Partial string’ retrieves results containing the search string within a longer string. The string doesn’t 
+#   need to be full words. For example, searching for ‘book’ will retrieve ֥‘book’, but also ‘e-book’, ‘booking’, 
+#   ‘notebook’, etc. (i.e. results which contain ‘book’ inside a longer string). This matching option is the 
+#   only one possible when searching in fields other than the Term field.
+#
+# If you select ‘Any word’, results matching any one of the words in the search string will be displayed below 
+# the more relevant results (e.g. if you search for ‘European Commission’ with ‘Any wordְ’ selected, 
+# ‘European citizen’ would be displayed below the ‘all words’ results listed above).
+#
+# ‘Regular expression’ allows advanced users to run more complex searches using these patterns:
+#    https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-regexp-query.html.
+#
+# "Any word": 0,
+# "All words": 1,
+# "Exact String": 2,
+# "Exact Match": 3,
+# "Regular Expression": 4,
+# "Partial String": 5,
+# "In": 6,
+# "Not In": 7,
+# "All": 8,
+# "Is Empty": 9,
+# "Is Not Empty": 10,
+# "Gt": 11,
+# "Gte": 12,
+# "Lt": 13,
+# "Lte": 14,
+# "Equals": 15,
+# "Between": 16,
+# "Only": 17,
+# "Light Any Word": 18,
+
 query_operator_input = pn.widgets.Select(
     value=2,
     name='Otsingu täpsus',
     options={
         "Kõik sõnad": 1,
-        "Exact String": 2,
-        "Täpne vaste": 3,
+        "Täpselt sama sõna": 2,
+        "Täpselt sama vaste": 3,
         "Osaline vaste": 5
     },
-    width=150
+    width=150,
+    description='Kõik sõnad - leiab vasted, mis sisaldavad kõiki otsitud sõnu\n '
+                'Täpselt sama sõna - leiab vasted, mis sisaldavad otsisõna\n '
+                'Täpselt sama vaste - leiab täpselt selle, mis otsisõnaks on (diakriitilisi märke ignoreeritakse)\n '
+                'Osaline vaste - leiab vasted, milles sisaldub otsisõna või otsisõna on mõne teise sõna osa'
 )
+
+only_first_batch_checkbox = pn.widgets.Checkbox(name='Kuva esimesed 10 IATE vastet')
 
 fetch_button = pn.widgets.Button(name='Otsi', button_type='primary', width=100)
 
@@ -174,6 +225,7 @@ input_widgets = pn.WidgetBox(
     search_in_fields_label,
     search_in_fields_input,
     query_operator_input,
+    only_first_batch_checkbox,
     fetch_button,
     sizing_mode='stretch_width'
 )

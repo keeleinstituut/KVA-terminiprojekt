@@ -4,7 +4,7 @@ from .token_controller import TokenController
 
 token_controller = TokenController()
 
-def perform_single_search(access_token, query, source, targets, session=None, **kwargs):
+def perform_single_search(access_token, query, source, targets, only_first_batch=False, session=None, **kwargs):
     url = "https://iate.europa.eu/em-api/entries/_search"
 
     headers = {
@@ -37,6 +37,8 @@ def perform_single_search(access_token, query, source, targets, session=None, **
         
         data = response.json()
 
+        print(f"Response size: {data['size']}")
+
         items = data.get('items', [])
 
         if not items:
@@ -44,7 +46,10 @@ def perform_single_search(access_token, query, source, targets, session=None, **
 
         all_results.extend(items)
 
-        #print(f"Batch size: {len(items)}, Total fetched so far: {len(all_results)}")
+        print(f"Batch size: {len(items)}, Total fetched so far: {len(all_results)}")
+
+        if only_first_batch:
+            break
 
         next_link = data.get('next', {}).get('href')
         if not next_link:
@@ -52,7 +57,7 @@ def perform_single_search(access_token, query, source, targets, session=None, **
 
         current_url = next_link
 
-    #print(f"Total size: {len(all_results)}")
+    print(f"Total size: {len(all_results)}")
 
     return all_results
 

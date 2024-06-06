@@ -92,24 +92,23 @@ def process_entry(entry, domains, target_languages):
                     'Keel': tl.upper(),
                     'Termin': term_entry['term_value'],
                     'Termini allikas': term_refs,
-                    'Termini märkus': term_note_text + term_note_references,
-                    'Definitsioon': definition_with_link + def_refs,
-                    'Märkus': note_texts + note_refs,
-                    'Kontekst': context_texts + context_refs,
+                    'Termini märkus': term_note_text + term_note_references.strip(' — '),
+                    'Definitsioon': definition_with_link + def_refs.strip(' — '),
+                    'Märkus': note_texts + note_refs.strip(' — '),
+                    'Kontekst': context_texts + context_refs.strip(' — '),
                 }
                 
                 processed_entries.append(processed_entry)
 
     return processed_entries
 
-def search_results_to_dataframe(query, source_languages, target_languages, num_pages, optional_parameters):
-    search_results_to_dataframe_algus = time.time()
+def search_results_to_dataframe(query, source_languages, target_languages, only_first_batch, optional_parameters):
 
     with requests.Session() as session:
         access_token = token_controller.get_access_token()
         results_list = []
 
-        results = perform_single_search(access_token, query, source_languages, target_languages, session=session, **optional_parameters)
+        results = perform_single_search(access_token, query, source_languages, target_languages, only_first_batch, session=session, **optional_parameters)
 
         script_dir = os.path.dirname(__file__)
         data_path = os.path.join(script_dir, '..', 'data', 'domains.json')
@@ -124,9 +123,8 @@ def search_results_to_dataframe(query, source_languages, target_languages, num_p
                 processed_entries = process_entry(entry, domains, target_languages)
                 results_list.extend(processed_entries)
 
-    search_results_to_dataframe_lopp = time.time()
-
     return pd.DataFrame(results_list)
+
 
 def get_domain_hierarchy_by_code(data, domain_code, hierarchy=None):
     if hierarchy is None:
