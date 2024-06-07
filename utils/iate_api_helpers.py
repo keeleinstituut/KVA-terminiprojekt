@@ -92,8 +92,8 @@ def process_entry(entry, domains, target_languages):
                     'Keel': tl.upper(),
                     'Termin': term_entry['term_value'],
                     'Termini allikas': term_refs,
-                    'Termini märkus': term_note_text + term_note_references.strip(' — '),
                     'Definitsioon': definition_with_link + def_refs.strip(' — '),
+                    'Termini märkus': term_note_text + term_note_references.strip(' — '),
                     'Märkus': note_texts + note_refs.strip(' — '),
                     'Kontekst': context_texts + context_refs.strip(' — '),
                 }

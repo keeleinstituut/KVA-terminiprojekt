@@ -198,6 +198,7 @@ query_operator_input = pn.widgets.Select(
     value=2,
     name='Otsingu täpsus',
     options={
+        "Ükskõik mis sõna": 0,
         "Kõik sõnad": 1,
         "Täpselt sama sõna": 2,
         "Täpselt sama vaste": 3,
