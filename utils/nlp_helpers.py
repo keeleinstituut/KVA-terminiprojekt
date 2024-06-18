@@ -7,9 +7,13 @@ from utils.upload_helpers import divide_chunks
 
 
 class SpacySenter:
-    def __init__(self) -> None:
-        self.nlp = spacy.load("en_core_web_trf", enable=[
-                              'transformer', 'parser'])
+    def __init__(self, model="en_core_web_trf") -> None:
+        self.model = model
+        if model == "en_core_web_trf":
+            self.nlp = spacy.load("en_core_web_trf", enable=[
+                                'transformer', 'senter'])
+        else:
+            self.nlp = spacy.load("en_core_web_sm", enable=["tok2vec", "parser"])
 
     def get_sentences(self, text: str = '') -> List[dict]:
         sentence_data = list()
@@ -23,8 +27,11 @@ class SpacySenter:
             text_blocks = [text]
 
         # lausestamine
-        for block in text_blocks:
-            sents = self.nlp(block).sents
+        n = 0 
+        #docs = list()
+        for block in self.nlp.pipe(text_blocks):
+            n += 1
+            sents = block.sents
             for sent in sents:
                 sentence_data.append({
                     'text': sent.text,
