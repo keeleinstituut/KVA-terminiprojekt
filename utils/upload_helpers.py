@@ -77,6 +77,8 @@ def reformat_text(text: str) -> str:
     return full_text
 
 
-def normalized_keywords(text: str) -> list[str]:
+def normalized_input_lists(text: str) -> list[str]:
+    if not text:
+        return []
     text = re.sub('(,|;)', '/+/', text)
     return [kw.strip().lower() for kw in text.split('/+/')]
