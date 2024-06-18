@@ -1,8 +1,8 @@
 from sqlalchemy import create_engine, text
-import logging
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import ResourceClosedError
 import pandas as pd
-import psycopg
-
+from sqlalchemy.pool import NullPool
 
 class Connection():
     def __init__(self, host: str, port: int, user: str, password: str, db: str):
@@ -10,14 +10,16 @@ class Connection():
         Initialize the Connection object.
         """
         self.connection_string = f'postgresql://{user}:{password}@{host}:{port}/{db}'
-        self.engine = None
+        self.engine = create_engine(self.connection_string, poolclass=NullPool)
+        self.Session = sessionmaker(bind=self.engine)
+        self.session = None
 
 
     def establish_connection(self):
-        self.engine = create_engine(self.connection_string)
+        self.session = self.Session()
         return self.engine
 
-    def table_to_dataframe(self, table_name: str, columns: list = None) -> pd.DataFrame:
+    def table_to_dataframe(self, table_name: str) -> pd.DataFrame:
         """
         Convert a table from the database to a pandas DataFrame.
 
@@ -27,12 +29,28 @@ class Connection():
         if not self.engine:
             raise ValueError("No connection established. Call establish_connection() first.")
         
-        with self.engine.connect() as connection:
-            df = pd.read_sql_table(table_name, con=connection, columns=columns)
-        
+
+        query = text(""" SELECT * from :table """)
+        data = {'table': table_name} 
+
+        result = self.session.execute(query, data)
+        print(result)
+
+        # Convert to DataFrame
+        df = pd.DataFrame(result.fetchall())
+
         return df
     
     def execute_sql(self, statement: str, data: list[dict]):
-        for line in data: 
-            engine.execute(text(statement), **line)
+        result = self.session.execute(text(statement), data)
+        try:
+            return result.fetchall()
+        except ResourceClosedError as e:
+            print(e)
+            return []
+    
+    def commit(self):
+        self.session.commit()
 
+    def close(self):
+        self.session.close()
