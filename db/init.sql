@@ -19,6 +19,6 @@ CREATE TABLE documents(
 
 CREATE TABLE keywords(
     id serial PRIMARY KEY,
-    keyword VARCHAR(255) NOT NULL UNIQUE,
-    pdf_filename VARCHAR(255) NOT NULL
+    keyword VARCHAR(255) NOT NULL,
+    document_id INTEGER NOT NULL REFERENCES public.documents (id) ON DELETE CASCADE
 );
