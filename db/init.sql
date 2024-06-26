@@ -4,7 +4,7 @@ CREATE TABLE documents(
     id serial PRIMARY KEY,
     pdf_filename VARCHAR(255) NOT NULL,
     json_filename VARCHAR(255) NOT NULL,
-    title VARCHAR(255),
+    title VARCHAR(255) NOT NULL,
     publication VARCHAR(255),
     year INT,
     author VARCHAR(255),
@@ -14,7 +14,7 @@ CREATE TABLE documents(
     date_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     date_vectordb_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     current_state document_state,
-    UNIQUE (pdf_filename, json_filename)
+    UNIQUE (pdf_filename, json_filename, title)
 );
 
 CREATE TABLE keywords(
