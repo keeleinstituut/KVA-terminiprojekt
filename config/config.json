@@ -3,7 +3,7 @@
         "qdrant": {
             "host": "ekivm",
             "port": 6333,
-            "collection_name": "kva_documents_simple"
+            "collection_name": "kva_test_upload"
         },
         "postgres": {
             "host": "ekivm",
@@ -17,13 +17,14 @@
         "embedding_model": "intfloat/multilingual-e5-large",
         "embedding_size": 1024,
         "max_tokens": 450,
-        "passage_prompt": "passage: "
+        "passage_prompt": "passage: ",
+        "query_prompt": "query: "
     },
     "document_chunking": {
         "sentence_block_size": 5
     },
-    "logging": {
-        "log_directory_path": "config/config.json",
-        "intermediate_storage": "data/temp"
+    "intermediate_storage": {
+        "json_storage_path": "C:/Users/sandra.eiche/Documents/git/KVA-terminiprojekt/data/temp",
+        "finished_json_storage_path": "C:/Users/sandra.eiche/Documents/git/KVA-terminiprojekt/data/finished"
     }
 }
