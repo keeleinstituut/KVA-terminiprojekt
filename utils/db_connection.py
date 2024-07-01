@@ -41,14 +41,27 @@ class Connection():
 
         return df
     
-    def execute_sql(self, statement: str, data: list[dict]):
+    def execute_sql(self, statement: str, data: list[dict]) -> dict:
         result = self.session.execute(text(statement), data)
         try:
-            return result.fetchall()
+            return {'data': result.fetchall(),
+                    'keys': result.keys()}
         except ResourceClosedError as e:
-            print(e)
-            return []
+            return  {}
+        except Exception as e:
+            self.session.rollback()
+            raise Exception('Failed to execute statement:', e)
     
+    def statement_to_df(self, statement: str):
+        try:
+            result = self.execute_sql(statement, [])
+            df = pd.DataFrame(result['data'])
+            df.columns = result['keys']
+            return df 
+        except Exception as e:
+            raise Exception(e)
+            
+
     def commit(self):
         self.session.commit()
 
