@@ -1,115 +1,145 @@
-import panel as pn
-from panel.chat import ChatInterface
-from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
-from qdrant_client.http.models import (FieldCondition, Filter, MatchAny,
-                                       MatchValue)
+import logging
 from collections import defaultdict
-import asyncio
+
+import panel as pn
+import param
+from panel.chat import ChatInterface
+
+import pandas as pd
+
 from app.config import config
+from app.models.chatter_model import FilterFactory, QdrantChat
+from utils.db_connection import Connection
+
+pn.extension("perspective")
+
+CONNECTION_PARAMS = {'host': config['dbs']['postgres']['host'],
+                     'port': config['dbs']['postgres']['port'],
+                     'user': config['dbs']['postgres']['user'],
+                     'password': config['dbs']['postgres']['password'],
+                     'db': config['dbs']['postgres']['collection_name']
+                     }
+
+# Configure logging
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 
 
+class FilterActionHandler(param.Parameterized):
+    """
+    This class is responsible for managing the user interface elements related to filtering
+    documents. It also handles the application of filters to the underlying chat model.
 
-class QdrantChat():
+    Attributes:
+        apply_filters_button (pn.widgets.Button): A button widget to apply the selected filters.
+        refresh_choices_button (pn.widgets.Button): A button widget to refresh the options for
+            keywords and document titles.
+        keyword_selector (pn.widgets.CrossSelector): A widget to select keywords for filtering.
+        file_selector (pn.widgets.CrossSelector): A widget to select document titles for filtering.
+        limit_slider (pn.widgets.EditableIntSlider): A slider widget to set the limit for the
+            number of responses.
+        validity_checkbox (pn.widgets.Checkbox): A checkbox widget to filter for documents marked as 
+            valid by the user previously.
+        filterfactory (FilterFactory): An instance of the FilterFactory class used for applying
+            filters to the chat model.
+        con (Connection): An instance of the Connection class for interacting with the database.
+        files_df (pd.DataFrame): A DataFrame containing the ids and titles of documents that have finished processing (included in vector database).
+        keywords_df (pd.DataFrame): A DataFrame containing the list of keywords.
+    """
 
-    target_files = []
 
-    response_limit = 5
-
-    chunk_validity_filter = FieldCondition(
-                key="validated",
-                match=MatchValue(
-                    value=True,
-                ),)
+    apply_filters_button = pn.widgets.Button(
+        name='Rakenda filtrid', button_type='primary', width=50, margin=(20, 60, 0, 0))
     
-    file_filter = FieldCondition(
-        key="filename",
-        match=MatchAny(any=target_files),)
+    refresh_choices_button = pn.widgets.Button(
+        name='Värskenda filtrid', button_type='primary', width=50, margin=(20, 0, 0, 20))
 
+    keyword_selector = pn.widgets.CrossSelector(name='Märksõnad', value=[],
+                                                options=[], size=8, width=500)
 
-    apply_chunk_validity_filter = True
-    apply_file_filter = False
-    
-    def __init__(self, model_name, collection_name) -> None:
-        self.model = SentenceTransformer(model_name)
-        self.collection_name = collection_name
+    file_selector = pn.widgets.CrossSelector(name='Dokumendid', value=[],
+                                             options=[], size=8, width=500)
 
-    def connect(self,host, port):
-        self.host = host
-        self.port = port
-        self.client = QdrantClient(host, port=port)
+    limit_slider = pn.widgets.EditableIntSlider(
+        name='Vastuste arv', start=1, end=20, step=1, value=5, width=500)
 
-    
-    async def chat_callback(self, contents, user, instance):
-        await asyncio.sleep(1.8)
-        db_filter = self.assemble_filter()
-        results = get_similarities(self.client, self.model, contents, 
-                                db_filter, collection_name=self.collection_name,
-                                response_limit=self.response_limit)
-        
-        response = ''
+    validity_checkbox = pn.widgets.Checkbox(
+        name='Otsi ainult kehtivatest', width=500)
 
-        for result in zip(results['response_text'], results['filename'], results['page_no']):
-            response += f'File: {result[1]}\nPage: {result[2]}\n\n{result[0]}\n{"*"*15}\n'
+    def __init__(self, filterfactory, **params):
+        super().__init__(**params)
+        self.filterfactory = filterfactory
 
-        return response
-    
-    def modify_filter(self, files):
-        self.target_files = files
+        self.con = Connection(**CONNECTION_PARAMS)
+        self.con.establish_connection()
 
-        if files:
-            self.file_filter.match = MatchAny(any=self.target_files)
-            self.apply_file_filter = True
+        self.refresh_selectors()
+
+    def load_keywords_from_db(self):
+        """ Loads the list of keywords from the database. """
+        try:
+            keywords_df = self.con.statement_to_df(
+                """ SELECT DISTINCT keyword FROM keywords """)
+            return keywords_df
+        except Exception as e:
+            logger.error(e)
+            return pd.DataFrame(columns=['keyword'])
+
+    def load_files_from_db(self):
+        """ Loads the list of processed document titles and ids from the database. """
+        try:
+            files_df = self.con.statement_to_df(
+                """ SELECT id, title FROM documents WHERE current_state = 'uploaded' """)
+            return files_df
+        except Exception as e:
+            logger.error(e)
+            return pd.DataFrame(columns=['id', 'title'])
+
+    @param.depends('refresh_choices_button.value', watch=True)
+    def refresh_selectors(self):
+        """ Refreshes the options for the keyword and document title selectors by utilizing previous methods. 
+        Responds to clicking refresh_choices_button. """
+        logger.info(
+            f'Refreshing file selection. Established Postgres connection')
+
+        # Refreshing file list
+        try:
+            self.files_df = self.load_files_from_db()
+            self.file_selector.options = list(self.files_df['title'])
+            self.keywords_df = self.load_keywords_from_db()
+            self.keyword_selector.options = list(self.keywords_df['keyword'])
+            logger.info('File selection refresh complete.')
+
+        except Exception as e:
+            logger.error(e)
+            pass
+
+    @param.depends('keyword_selector.value', watch=True)
+    def keyword_filtering(self):
+        """ Filters the document title options based on the selected keywords. Responds to changes in keyword selector widget."""
+        selected_kw_values = self.keyword_selector.value
+        if selected_kw_values:
+            logger.info(selected_kw_values)
+            self.con.establish_connection()
+            try:
+                result = self.con.execute_sql("""SELECT document_id FROM keywords WHERE keyword IN :kws""", [
+                                              {'kws': (tuple(selected_kw_values))}])
+                compatible_document_ids = [row[0] for row in result['data']]
+                selected_files = list(
+                    self.files_df[self.files_df['id'].isin(compatible_document_ids)]['title'])
+                self.file_selector.options = selected_files
+                self.file_selector.value = selected_files
+            except Exception as e:
+                logger.error(e)
         else:
-            self.apply_file_filter = False
+            self.refresh_selectors()
 
-    def assemble_filter(self):
-        conditions = []
-        if self.apply_file_filter:
-            conditions.append(self.file_filter)
-        if self.apply_chunk_validity_filter:
-            conditions.append(self.chunk_validity_filter)
-
-        return Filter(must=conditions)
-    
-    def set_response_limit(self, response_limit):
-        self.response_limit = response_limit
-
-
-def get_similarities(client, model, text, query_filter,
-                     collection_name="kva_test_collection", response_limit = 5):
-    """
-    Searches for similar documents in a collection based on a given text and query filter.
-
-    Args:
-    - text (str): The text to search for similar documents.
-    - query_filter (dict): A dictionary specifying the filter criteria for the search.
-    - collection_name (str, optional): The name of the collection to search within, defaults to "kva_test_collection".
-    - response_limit (int, optional): The maximum number of search results to return, defaults to 5.
-
-    Returns:
-    - dict: A dictionary containing lists of response texts, response types, scores, filenames, and page numbers.
-    """
-
-    search_result = client.search(
-        collection_name=collection_name,
-        query_vector=list(model.encode(text, normalize_embeddings=True).astype(float)),
-        query_filter=query_filter,
-        limit=response_limit,
-        timeout=100)
-    
-    result_dict = defaultdict(list)
-    
-    for point in search_result:
-        if not point.payload:
-            continue
-        result_dict['response_text'].append(point.payload["text"])
-        result_dict['response_type'].append(point.payload["content_type"])
-        result_dict['score'].append(point.score)
-        result_dict['filename'].append(point.payload["filename"])
-        result_dict['page_no'].append(point.payload["page_number"])
-
-    return result_dict
+    @param.depends('apply_filters_button.value', watch=True)
+    def apply_filters(self):
+        """ Applies the selected filters to the chat model using the FilterFactory. Responds to apply_filters_button widget."""
+        self.filterfactory.apply_filters(files=self.file_selector.value,
+                                         response_limit=self.limit_slider.value,
+                                         document_validity=self.validity_checkbox.value)
 
 
 def chat_view():
@@ -120,24 +150,27 @@ def chat_view():
     embedding_model = config["embeddings"]["embedding_model"]
     collection_test = config["dbs"]["qdrant"]["collection_name"]
 
-    chatter = QdrantChat(embedding_model, collection_test)
+    filterfactory = FilterFactory()
+    chatter = QdrantChat(embedding_model, collection_test,
+                         filterfactory, prompt=config['embeddings']["query_prompt"])
+
     chatter.connect(client_host, client_port)
+    logger.info(f'Established Qdrant connection')
 
-    pn.extension("perspective")
+    filter_handler = FilterActionHandler(chatter.filterfactory)
 
-    multi_select = pn.widgets.MultiSelect(name='Dokumendid', value=[],
-    options=['jp3_09.pdf', 'AJP-3.2_EDA_V1_E_2288.pdf', 'fm3-09.pdf', 'app-6-c.pdf'], size=8)
+    toggle = pn.widgets.Toggle(name='Kuva filtrid', button_type='primary', width=50)
 
-    limit_slider = pn.widgets.EditableIntSlider(name='Vastuste arv', start=1, end=20, step=1, value=5)
+    # Callback to show/hide the filters
+    @param.depends(toggle.param.value, watch=True)
+    def toggle_filters(show):
+        if show:
+            filter_column.visible = True
+            toggle.name = 'Peida filtrid'
+        else:
+            filter_column.visible = False
+            toggle.name = 'Kuva filtrid'
 
-    button = pn.widgets.Button(name='Rakenda filtrid', button_type='primary')
-
-    def select_files(event):
-        chatter.modify_filter(multi_select.value)
-        chatter.set_response_limit(limit_slider.value)
-
-    button.on_click(select_files)
-    
     ci = ChatInterface(
         callback_exception='verbose',
         callback=chatter.chat_callback,
@@ -148,9 +181,26 @@ def chat_view():
         show_stop=False,
         show_rerun=False,
         show_undo=False,
+        button_properties={"send": {"name": "Saada"}}
     )
 
-    filter_column = pn.Column(multi_select, limit_slider, button)
-    layout = pn.Row(ci, filter_column)
+    try:
+
+        filter_column = pn.Column(
+            pn.pane.HTML('<label>Vali märksõnad</label>'),
+            filter_handler.keyword_selector,
+            pn.pane.HTML('<label>Vali dokumendid</label>'),
+            filter_handler.file_selector,
+            filter_handler.limit_slider,
+            filter_handler.validity_checkbox,
+            pn.Row(filter_handler.apply_filters_button, 
+                   filter_handler.refresh_choices_button),
+            visible=False
+        )
+
+    except Exception as e:
+        logger.error(e)
+
+    layout = pn.Row(ci, pn.Column(toggle, filter_column))
 
     return layout
