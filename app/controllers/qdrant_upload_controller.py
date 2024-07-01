@@ -72,11 +72,24 @@ def section_chunks_to_points(document_metadata: dict,
 
 
 
-def upload_vector_data(dir, filename,
-                       config,
-                       qdrant_client, pg_connection, 
-                       embedding_model, 
-                       tokenizer, senter):
+def upload_vector_data(dir, filename: str,
+                       config: dict,
+                       qdrant_client: QdrantClient, pg_connection: Connection, 
+                       embedding_model: SentenceTransformer, 
+                       tokenizer, senter) -> None:
+    """
+    Uploads vector data to the Qdrant vector database and updates the document status to 'uploaded' in the PostgreSQL database.
+
+    Args:
+        dir (str): The directory path where the JSON file is located.
+        filename (str): The name of the JSON file containing the document data.
+        config (dict): A dictionary containing configuration settings.
+        qdrant_client (QdrantClient): An instance of the QdrantClient used to interact with the Qdrant database.
+        pg_connection (Connection): Connection instance used to interact with the PostgreSQL database.
+        embedding_model (SentenceTransformer): A pre-trained sentence transformer model for encoding text into vectors.
+        tokenizer (E5Tokenizer): An instance of the E5Tokenizer used for tokenizing text.
+        senter (SpacySenter): An instance of the SpacySenter used for sentence segmentation.
+    """
 
     logger.info(f'Loading from config: {config}')
     collection_name = config['dbs']['qdrant']['collection_name']
@@ -135,14 +148,14 @@ def upload_vector_data(dir, filename,
             """UPDATE documents
             SET current_state = 'uploaded'
             WHERE pdf_filename = :fname;""",
-            {'fname': document.filename}
+            [{'fname': document.filename}]
         )
         pg_connection.commit()
     except Exception as e:
         logger.error(e)
 
 
-def upload_to_qdrant():
+def upload_to_qdrant() -> None:
     logging.info('Starting upload to qdrant')
 
     intermediate_storage_path = config['intermediate_storage']['json_storage_path']

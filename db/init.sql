@@ -14,7 +14,8 @@ CREATE TABLE documents(
     date_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     date_vectordb_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     current_state document_state,
-    UNIQUE (pdf_filename, json_filename, title)
+    UNIQUE (pdf_filename),
+    UNIQUE (title)
 );
 
 CREATE TABLE keywords(

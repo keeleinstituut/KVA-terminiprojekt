@@ -11,12 +11,13 @@ from app.config import config
 
 from utils.db_connection import Connection
 from utils.upload_helpers import reformat_text
+from io import BytesIO
 
 # Configure logging
 logger = logging.getLogger('app')
 logger.setLevel(logging.INFO)
 
-def load_content_text(pdf_file):
+def load_content_text(pdf_file: BytesIO) -> list[str]:
     logger.info('Loading data from pdf file')
     content_text_data = []
 
@@ -32,7 +33,7 @@ def load_content_text(pdf_file):
     return content_text_data
 
 
-def file_exists_in_collection(con, filename: str):
+def file_exists_in_collection(con: Connection, filename: str) -> bool:
     """
     Checks, whether the filename is already present in given collection or not.
 
@@ -51,7 +52,33 @@ def file_exists_in_collection(con, filename: str):
     return False
 
 
-def upload_to_db(input_pdf, pdf_meta):
+def upload_to_db(input_pdf: BytesIO, pdf_meta: dict) -> int:        
+    """
+        Uploads the metadata of a document to PostgreSQL database. 
+        Generates json from PDF content and metadata for further processing.
+    
+        Args:
+            input_pdf (BytesIO): Content to the input PDF file.
+            pdf_meta (dict): A dictionary containing the metadata of the PDF file, including:
+                filename (str): The name of the PDF file.
+                publication (str): The publication name.
+                publication_year (int): The year of publication.
+                title (str): The title of the PDF.
+                author (str): The author of the PDF.
+                languages (list): A list of languages present in the PDF.
+                keywords (list): A list of keywords associated with the PDF.
+                is_valid (bool): A flag indicating whether the PDF is valid or not.
+    
+        Returns:
+            int: A status code indicating the success or failure of the operation:
+                - 1: Successful upload
+                - -1: PDF file already exists in the database
+                - -2: An unexpected error occurred during the upload process
+    
+        Raises:
+            IntegrityError: If the PDF file already exists in the database.
+            Exception: If any other unexpected error occurs during the upload process.
+        """
 
     # Accessing configuration values
     client_host = config['dbs']['qdrant']['host']
@@ -66,7 +93,6 @@ def upload_to_db(input_pdf, pdf_meta):
 
     embedding_size = config['embeddings']['embedding_size']
     intermediate_storage_path = config['intermediate_storage']['json_storage_path']
-    
     
     logger.info("Configuration loaded successfully")
 
@@ -120,7 +146,7 @@ def upload_to_db(input_pdf, pdf_meta):
             'is_valid': document_data['is_valid'], 
             'current_state': 'processing'}]   
         result = con.execute_sql(query, data)
-        doc_id = result[0][0]
+        doc_id = result['data'][0][0]
         
         # Keywords entry
         logger.info("Inserting keywords into 'documents'.")
@@ -135,10 +161,12 @@ def upload_to_db(input_pdf, pdf_meta):
         con.close()
     except IntegrityError as e:
         logger.error(f"An error occurred: {e}. File is already present in database. Canceling transaction.")
+        con.session.rollback()
         return -1
     
     except Exception as e:
         logger.error(f"An error occurred: {e}")
+        con.session.rollback()
         return -2
 
     # Adding body text to document data
