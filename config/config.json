@@ -24,7 +24,7 @@
         "sentence_block_size": 5
     },
     "intermediate_storage": {
-        "json_storage_path": "C:/Users/sandra.eiche/Documents/git/KVA-terminiprojekt/data/temp",
-        "finished_json_storage_path": "C:/Users/sandra.eiche/Documents/git/KVA-terminiprojekt/data/finished"
+        "json_storage_path": "../data/temp",
+        "finished_json_storage_path": "../data/finished"
     }
 }
