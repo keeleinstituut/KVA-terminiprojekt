@@ -12,7 +12,7 @@ import logging.config
 
 from app.controllers.qdrant_upload_controller import upload_to_qdrant
 
-logging.config.fileConfig('../config/logging.config')
+logging.config.fileConfig(os.getenv('LOGGER_CONFIG'), defaults={'filename': os.getenv('LOG_FILE')})
 logger = logging.getLogger('app')
 
 def job_listener(event):
@@ -40,4 +40,4 @@ template = pn.template.VanillaTemplate(
     sidebar_width=300
 )
 
-pn.serve(template, title="Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas")
+template.servable(title="Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas")
