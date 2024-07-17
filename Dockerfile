@@ -32,6 +32,7 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl --fail http://localhost:5006 || exit 1
 
 # Run the command to start the application
-CMD ["panel", "serve", "main.py", "--port", "5006", "--allow-websocket-origin", "*"]
+#CMD ["panel", "serve", "main.py", "--port", "5006", "--allow-websocket-origin", "*"]
+CMD ["python", "main.py"]
 
 

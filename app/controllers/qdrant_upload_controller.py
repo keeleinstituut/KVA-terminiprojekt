@@ -124,13 +124,11 @@ def upload_vector_data(dir, filename: str,
                                                             n_sentences_in_block=sentence_block_size)
 
     # Chunks to PointStruct
-    logger.setLevel(logging.CRITICAL)
     logger.info(f'{len(content_chunks)} chunks generated, Creating embeddings.')
     section_points = section_chunks_to_points(document_metadata, content_chunks, 
                                                 model=embedding_model, passage_prompt=passage_prompt)
 
     logger.info(f'Embeddings created, starting upload to {collection_name}.')
-    logger.setLevel(logging.DEBUG)
     step = 100
     logger.info(f'{len(section_points)} chunks generated for section.')
 
@@ -144,6 +142,7 @@ def upload_vector_data(dir, filename: str,
     logger.info(f'{len(section_points)} chunks added to database')
 
     try:
+        logger.info('Starting PG status update.')
         pg_connection.execute_sql(
             """UPDATE documents
             SET current_state = 'uploaded'
@@ -151,6 +150,7 @@ def upload_vector_data(dir, filename: str,
             [{'fname': document.filename}]
         )
         pg_connection.commit()
+        logger.info('Finished PG status update.')
     except Exception as e:
         logger.error(e)
 

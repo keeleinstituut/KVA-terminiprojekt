@@ -1,24 +1,19 @@
 import collections
-import param
+import copy
+import logging
+import time
+
 import panel as pn
+import param
 
 from app.controllers.pdf_upload_controller import upload_to_db
 from utils.upload_helpers import normalized_input_lists
-import time
-import copy
+
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 
 BUTTON_WIDTH = 125
 INPUT_WIDTH = 300
-
-USER_INPUT_FIELDS = collections.OrderedDict(
-    {"publication": pn.widgets.TextInput(name='Publikatsioon'),
-     "publication_year": pn.widgets.IntInput(name='Aasta', value=2024, start=0, end=3000),
-     "title": pn.widgets.TextInput(name='Pealkiri'),
-     "author": pn.widgets.TextInput(name='Autor'),
-     "languages": pn.widgets.TextInput(name='Keeled', description='Eralda keeled komadega'),
-     "keywords": pn.widgets.TextInput(name='Märksõnad', description='Eralda märksõnad komadega'),
-     "is_valid": pn.widgets.Checkbox(name='Kehtetu', value=False)}
-)
 
 DEFAULT_METADATA = {"publication": "",
               "publication_year": 2024,
@@ -28,7 +23,7 @@ DEFAULT_METADATA = {"publication": "",
               "keywords": [],
               "is_valid": False}
 
-class DataHandler(param.Parameterized):
+class DataHandler():
     """
     A class that handles user input for uploading PDF files and associated metadata.
 
@@ -38,35 +33,54 @@ class DataHandler(param.Parameterized):
         pdf_viewer (pn.pane.PDF): A panel for displaying the selected PDF file.
         submit_button (pn.widgets.Button): A button for submitting the user input and uploading the file.
         new_entry_button (pn.widgets.Button): A button for resetting the input fields to upload a new file.
-        static_text (pn.widgets.StaticText): A static text widget.
         alert_pane (pn.pane.Alert): An alert pane for displaying warning messages.
         metadata (dict): A dictionary containing the metadata for the uploaded file.
     """
-    
-    user_input_widgets = collections.OrderedDict()
-
-    # PDF browsing
-    pdf_input = pn.widgets.FileInput(accept='.pdf', name='Vali fail', filename='', width=INPUT_WIDTH)
-    pdf_viewer = pn.pane.PDF(pdf_input, width=500, height=800)
-
-    submit_button = pn.widgets.Button(button_type='primary', name='Salvesta', align='start', width=BUTTON_WIDTH)
-    new_entry_button = pn.widgets.Button(button_type='primary', name='Uus fail', align='end', width=BUTTON_WIDTH)
- 
-    static_text = pn.widgets.StaticText(name='Static Text', value='A string')
-    alert_pane = pn.pane.Alert(object = 'Sisesta fail!', alert_type='warning', width = INPUT_WIDTH, height = 70, visible = False)
-
-    metadata = copy.deepcopy(DEFAULT_METADATA)
-
     def __init__(self,**params):
-        super().__init__(**params)
-        self.user_input_widgets['filename'] = pn.widgets.TextInput(name='Faili pealkiri', placeholder=self.pdf_input.param.filename, disabled=True)
-        self.user_input_widgets.update(USER_INPUT_FIELDS)
+        self.metadata = copy.deepcopy(DEFAULT_METADATA)
+        user_input_fields = collections.OrderedDict(
+            {"publication": pn.widgets.TextInput(name='Publikatsioon'),
+            "publication_year": pn.widgets.IntInput(name='Aasta', value=2024, start=0, end=3000),
+            "title": pn.widgets.TextInput(name='Pealkiri'),
+            "author": pn.widgets.TextInput(name='Autor'),
+            "languages": pn.widgets.TextInput(name='Keeled', description='Eralda keeled komadega'),
+            "keywords": pn.widgets.TextInput(name='Märksõnad', description='Eralda märksõnad komadega'),
+            "is_valid": pn.widgets.Checkbox(name='Kehtetu', value=False)}
+            )
+        
+        self.user_input_widgets = collections.OrderedDict()
+        self.pdf_input = pn.widgets.FileInput(accept='.pdf', name='Vali fail', filename='', width=INPUT_WIDTH)
+        self.pdf_viewer = pn.pane.PDF(self.pdf_input, width=500, height=800)
 
-    @param.depends('submit_button.value', watch=True)
-    def refresh_metadata(self) -> None:
+        self.user_input_widgets['filename'] = pn.widgets.TextInput(name='Faili pealkiri', placeholder=self.pdf_input.param.filename, disabled=True)
+        self.user_input_widgets.update(user_input_fields)
+
+        # Buttons and button actions
+        self.submit_button = pn.widgets.Button(button_type='primary', name='Salvesta', align='start', width=BUTTON_WIDTH)
+        self.new_entry_button = pn.widgets.Button(button_type='primary', name='Uus fail', align='end', width=BUTTON_WIDTH)
+        self.submit_button.on_click(self.refresh_metadata)
+        self.new_entry_button.on_click(self.new_input)
+
+        self.alert_pane = pn.pane.Alert(object = 'Sisesta fail!', alert_type='warning', width = INPUT_WIDTH, height = 70, visible = False)
+
+
+        right_column = pn.Column(self.pdf_viewer)
+        left_column = pn.Column(self.pdf_input,
+                                *self.user_input_widgets.values(),
+                                pn.Row(self.submit_button,
+                                        self.new_entry_button),
+                                self.alert_pane
+                                )
+
+        self.page_layout = pn.Row(left_column, right_column)
+        super().__init__(**params)
+
+
+    def refresh_metadata(self, event) -> None:
         """ Updates the metadata dictionary with the user input values and uploads the metadata to the database. """
         self.submit_button.disabled=True
         self.new_entry_button.disabled=True
+        logger.info("Saving triggered")
         time.sleep(5)
         for name, widget in self.user_input_widgets.items():
             field_input = widget.value
@@ -93,11 +107,11 @@ class DataHandler(param.Parameterized):
         self.new_entry_button.disabled=False
             
             
-    @param.depends('new_entry_button.value', watch=True)
-    def new_input(self) -> None:
+    def new_input(self, event) -> None:
         """
         Resets the input fields to their default values for uploading a new file.
         """
+        logger.info("New input triggered")
         # Todo: uue saab alles siis sisestada, kui json on valmis ja metaandmed postgres? 
         self.alert_pane.param.update(visible=False)
         for name, widget in self.user_input_widgets.items():
@@ -122,15 +136,4 @@ def file_upload() -> pn.layout.ListPanel:
     """
 
     metadata = DataHandler()
-
-    right_column = pn.Column(metadata.pdf_viewer)
-    left_column = pn.Column(metadata.pdf_input,
-                            *metadata.user_input_widgets.values(),
-                            pn.Row(metadata.submit_button,
-                                    metadata.new_entry_button),
-                            metadata.alert_pane
-                            )
-
-    page_layout = pn.Row(left_column, right_column)
-
-    return page_layout
+    return metadata.page_layout

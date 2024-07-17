@@ -47,31 +47,30 @@ class FilterActionHandler(param.Parameterized):
         keywords_df (pd.DataFrame): A DataFrame containing the list of keywords.
     """
 
-
-    apply_filters_button = pn.widgets.Button(
-        name='Rakenda filtrid', button_type='primary', width=50, margin=(20, 60, 0, 0))
-    
-    refresh_choices_button = pn.widgets.Button(
-        name='Värskenda filtrid', button_type='primary', width=50, margin=(20, 0, 0, 20))
-
-    keyword_selector = pn.widgets.CrossSelector(name='Märksõnad', value=[],
-                                                options=[], size=8, width=500)
-
-    file_selector = pn.widgets.CrossSelector(name='Dokumendid', value=[],
-                                             options=[], size=8, width=500)
-
-    limit_slider = pn.widgets.EditableIntSlider(
-        name='Vastuste arv', start=1, end=20, step=1, value=5, width=500)
-
-    validity_checkbox = pn.widgets.Checkbox(
-        name='Otsi ainult kehtivatest', width=500)
-
     def __init__(self, filterfactory, **params):
-        super().__init__(**params)
         self.filterfactory = filterfactory
 
         self.con = Connection(**CONNECTION_PARAMS)
         self.con.establish_connection()
+
+        self.apply_filters_button = pn.widgets.Button(
+        name='Rakenda filtrid', button_type='primary', width=50, margin=(20, 60, 0, 0))
+    
+        self.refresh_choices_button = pn.widgets.Button(
+            name='Värskenda filtrid', button_type='primary', width=50, margin=(20, 0, 0, 20))
+
+        self.keyword_selector = pn.widgets.CrossSelector(name='Märksõnad', value=[],
+                                                    options=[], size=8, width=500)
+        self.file_selector = pn.widgets.CrossSelector(name='Dokumendid', value=[],
+                                                options=[], size=8, width=500)
+
+        self.limit_slider = pn.widgets.EditableIntSlider(
+            name='Vastuste arv', start=1, end=20, step=1, value=5, width=500)
+
+        self.validity_checkbox = pn.widgets.Checkbox(
+            name='Otsi ainult kehtivatest', width=500)
+        
+        super().__init__(**params)
 
         self.refresh_selectors()
 
