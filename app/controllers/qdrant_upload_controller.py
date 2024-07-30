@@ -48,9 +48,9 @@ def section_chunks_to_points(document_metadata: dict,
 
     for chunk in section_chunks:
         try:
-            if not chunk.get_text():
+            chunk_text = chunk.get_text()
+            if not chunk_text:
                 continue
-            chunk_text = 'passage:' + chunk.get_text()
         except TypeError:
             raise TypeError
         payload = document_metadata.copy()
@@ -129,7 +129,7 @@ def upload_vector_data(dir, filename: str,
                                                 model=embedding_model, passage_prompt=passage_prompt)
 
     logger.info(f'Embeddings created, starting upload to {collection_name}.')
-    step = 100
+    step = 20
     logger.info(f'{len(section_points)} chunks generated for section.')
 
     for i in range(0, len(section_points), step):
