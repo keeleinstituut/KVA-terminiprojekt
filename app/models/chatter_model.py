@@ -6,6 +6,11 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.models import (FieldCondition, Filter, MatchAny,
                                        MatchValue)
 from sentence_transformers import SentenceTransformer
+import re
+from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+import weave
 
 # Configure logging
 logger = logging.getLogger('app')
@@ -75,6 +80,7 @@ class FilterFactory():
         """ Sets whether to apply the document validity filter. """
         self.apply_document_validity_filter = document_validity
 
+    @weave.op()
     def assemble_filter(self) -> Filter:
         """ Assembles and returns the final filter based on the current settings. """
         conditions = []
@@ -164,3 +170,69 @@ class QdrantChat():
             result_dict['page_no'].append(point.payload["page_number"])
 
         return result_dict
+    
+
+class LLMChat():
+    
+    chat_template = ChatPromptTemplate.from_messages(
+    [
+        ("system", "Oled terminoloog, kes koostab terminibaasi. Otsid olulist infot märksõna kohta ja oled leidnud viis tähtsamat osa erinevatest dokumentidest. "
+         "Sinu ülesanne on välja tuua mõistekirje koostamiseks kõige olulisemad terviklikud lõigud ja esitada need vastuses koos õige dokumendi pealkirja ja lehekülje numbriga ning põhjendusega, "
+         "miks see lõik on mõistekirje koostamiseks oluline. Too vähemalt üks lõik välja ka siis, kui info ei tundu relevantne. Vormista loendina: 1. 'lõik' (dokument, lehekülg)."),
+        ("human", "Märksõna: {user_input}"),
+        ("human", "Leitud lõigud:\n{retrieval_results}")
+    ]
+    )
+
+    """chat_template = ChatPromptTemplate.from_messages(
+    [
+        ("system", "You are a terminologist compiling a terminology database. You are searching for important information about a keyword and have found five key sections from different documents."
+         "Your task is to extract the most important coherent paragraphs for compiling a term entry and present them in your response along with the correct document title, page number, and justification "
+         "for why this paragraph is important for the entry. "
+         "Provide at least one paragraph even if the information does not seem relevant. Format as a list: 1. 'paragraph' (document, page)."),
+        ("human", "Keyword: {user_input}"),
+        ("human", "Key sections:\n{retrieval_results}")
+    ]
+    )"""
+
+    def __init__(self, model_name: str, qdrant_chatter: QdrantChat, api_key) -> None:
+        self.qdrant_chatter = qdrant_chatter
+        self.model_name = model_name
+        self.temperature = 0
+        self.max_retries = 2
+        self.api_key = api_key
+        self.llm = self.connect_language_model()
+
+    def connect_language_model(self):
+
+        if re.match('claude', self.model_name):
+            llm = ChatAnthropic(
+                model_name=self.model_name,
+                temperature=self.temperature,
+                stop=None,
+                base_url='',
+                api_key=None,
+                timeout=None,
+                max_retries=self.max_retries,
+                )
+            
+        elif re.match('gpt', self.model_name):
+            llm = ChatOpenAI(
+                model=self.model_name,
+                temperature=self.temperature,
+                max_tokens=None,
+                timeout=None,
+                max_retries=self.max_retries,
+                api_key=self.api_key
+                )
+            
+        return llm
+        
+    @weave.op()
+    async def chat_callback(self, contents: str, user, instance) -> str:
+        """ A callback function for handling user input and generating responses. """
+        await asyncio.sleep(1.8)
+        context = await self.qdrant_chatter.chat_callback(contents, '', '')
+        prompt = self.chat_template.format_messages(user_input={contents}, retrieval_results={context})
+        response = self.llm.invoke(prompt)
+        return response.content   

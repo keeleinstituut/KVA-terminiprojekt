@@ -1,14 +1,23 @@
-import sys
 import os
+import sys
+
 import panel as pn
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app.views.api_view import api_view
-from app.views.file_upload import file_upload
-from app.views.chat_view import chat_view
 import logging.config
+import os
+
+import weave
 
 from app.models.qdrant_upload_scheduler import QdrantScheduler
+from app.views.api_view import api_view
+from app.views.chat_view import chat_view
+from app.views.file_upload import file_upload
+from app.views.llm_view import llm_view
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+weave.init('Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas')
 
 logging.config.fileConfig(os.getenv('LOGGER_CONFIG'), defaults={'filename': os.getenv('LOG_FILE')})
 logger = logging.getLogger('app')
@@ -21,7 +30,7 @@ class TerminologyApp():
     def __init__(self):
         file_upload_area = pn.Column(file_upload())
         api_view_area = pn.Column(api_view())
-        chat_view_area = pn.Column(chat_view())
+        chat_view_area = pn.Column(llm_view())
 
         tabs = pn.Tabs(
             ('Failide üles laadimine', file_upload_area),
@@ -42,4 +51,4 @@ def create_app():
 
 
 if __name__ == '__main__':
-    pn.serve({'/': create_app()}, port=os.getenv('PANEL_PORT'))
+    pn.serve({'/': create_app()}, port=int(os.getenv('PANEL_PORT')))
