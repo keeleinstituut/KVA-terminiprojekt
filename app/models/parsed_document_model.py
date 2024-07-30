@@ -161,7 +161,7 @@ class DataField:
 @dataclass
 class TextualContent(DataField):
 
-    def to_chunks(self, sentensizer, tokenizer, max_tokens: int = 512, n_sentences_in_block: int = 3, n_sentence_overlap: int = 0) -> List[Chunk]:
+    def to_chunks_sentences(self, sentensizer, tokenizer, max_tokens: int = 512, n_sentences_in_block: int = 3, n_sentence_overlap: int = 0) -> List[Chunk]:
         """
         Converts the provided document data into a list of text chunks that are appropriate for further processing.
 
@@ -218,6 +218,63 @@ class TextualContent(DataField):
                     extracted_chunk = self.block_to_chunk(
                         text, page_spans, sentence_block)
                     if extracted_chunk:
+                        chunks.append(extracted_chunk)
+
+        return chunks
+
+
+    def to_chunks(self, sentensizer, tokenizer, max_tokens: int = 200, n_sentences_in_block: int = 3, n_sentence_overlap: int = 0) -> List[Chunk]:
+        """
+        Converts the provided document data into a list of text chunks that are appropriate for further processing.
+
+        Args:
+            - sentensizer (object): An instance of a sentence boundary detection tool used to segment the text into sentences.
+            - tokenizer (object): An instance of a tokenizer used to convert text into tokens.
+            - max_tokens (int, optional): The maximum number of tokens allowed in each chunk. Defaults to 512.
+            - n_sentences_in_block (int, optional): The number of sentences that should be grouped together into a block before tokenization. Defaults to 3.
+            - n_sentence_overlap (int, optional): The number of sentences that overlap between consecutive blocks. Defaults to 0.
+
+        Returns:
+            List[Chunk]: A list of Chunk objects, each representing a segment of text that has been processed according to the specified parameters. Each chunk adheres to the size restrictions set by max_tokens.
+        """
+
+        # 1) Full text extraction, finding page ranges
+        chunks = list()
+        full_text = ''
+        page_spans = {}
+        last_page_final_character_loc = -1
+
+        for page_data in self.document_field_json:
+            page_number = page_data['page_number']
+            page_text = page_data['text'] + ' '
+            page_text_length = len(page_text)
+            full_text += page_text
+
+            if page_number == 1:
+                page_spans.update({1: (0, page_text_length)})
+                last_page_final_character_loc = page_text_length
+            else:
+                page_spans.update({page_number: (last_page_final_character_loc, last_page_final_character_loc + page_text_length)})
+                last_page_final_character_loc = last_page_final_character_loc + page_text_length
+
+        # 2) Tokenizing full text
+        tokenlist = tokenizer.get_tokens(full_text)
+
+        # 2) Split tokens to blocks and generate Chunk objects
+        for token_block in divide_chunks(tokenlist, max_tokens):
+            token_block_text = full_text[token_block[0]['start_char']: token_block[-1]['end_char']+1]
+            block_start_index  = token_block[0]['start_char']
+            # Finding page of the sentence block based on the beginning of the block
+            page_number = self._get_block_page_number(
+                page_spans, block_start_index)
+
+            if token_block_text.strip() != '':
+                extracted_chunk =  Chunk(token_block_text, page_number,
+                                'content_text', validated=self._validate_chunk_text(token_block_text, min_word_count=10))
+            else:
+                extracted_chunk = None
+
+            if extracted_chunk:
                         chunks.append(extracted_chunk)
 
         return chunks
