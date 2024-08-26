@@ -10,7 +10,7 @@ import re
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-import weave
+# import weave
 
 # Configure logging
 logger = logging.getLogger('app')
@@ -80,7 +80,7 @@ class FilterFactory():
         """ Sets whether to apply the document validity filter. """
         self.apply_document_validity_filter = document_validity
 
-    @weave.op()
+    # @weave.op()
     def assemble_filter(self) -> Filter:
         """ Assembles and returns the final filter based on the current settings. """
         conditions = []
@@ -228,7 +228,7 @@ class LLMChat():
             
         return llm
         
-    @weave.op()
+    # @weave.op()
     async def chat_callback(self, contents: str, user, instance) -> str:
         """ A callback function for handling user input and generating responses. """
         await asyncio.sleep(1.8)
