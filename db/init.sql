@@ -9,6 +9,7 @@ CREATE TABLE documents(
     year INT,
     author VARCHAR(255),
     languages VARCHAR(255),
+    url VARCHAR(255),
     is_valid BOOLEAN,
     date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     date_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
