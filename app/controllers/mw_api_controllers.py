@@ -3,9 +3,6 @@ from dotenv import load_dotenv
 import os
 
 
-load_dotenv()
-
-
 def get_data(query, dictionary_type):
     ref = 'collegiate'
 

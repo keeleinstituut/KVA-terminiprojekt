@@ -92,7 +92,7 @@ def upload_vector_data(dir, filename: str,
     """
 
     logger.info(f'Loading from config: {config}')
-    collection_name = config['dbs']['qdrant']['collection_name']
+    collection_name = os.getenv('QDRANT_COLLECTION') # config['dbs']['qdrant']['collection_name']
     max_tokens = config['embeddings']['max_tokens']
     passage_prompt = config['embeddings']['passage_prompt']
     sentence_block_size = config['document_chunking']['sentence_block_size']
@@ -166,16 +166,16 @@ def upload_to_qdrant() -> None:
         return None
 
     logging.info('Accessing configuration values')
-    client_host = config['dbs']['qdrant']['host']
-    client_port = config['dbs']['qdrant']['port']
+    client_host = os.getenv('QDRANT_HOST')
+    client_port = os.getenv('QDRANT_PORT')
 
     embedding_model = config['embeddings']['embedding_model']
 
-    pg_host = config['dbs']['postgres']['host']
-    pg_port = config['dbs']['postgres']['port']
-    pg_user = config['dbs']['postgres']['user']
-    pg_password = config['dbs']['postgres']['password']
-    pg_collection_name = config['dbs']['postgres']['collection_name']
+    pg_host = os.getenv('PG_HOST')
+    pg_port = os.getenv('PG_PORT')
+    pg_user = os.getenv('PG_USER')
+    pg_password = os.getenv('PG_PASSWORD')
+    pg_collection_name = os.getenv('PG_COLLECTION')
 
     con = Connection(host=pg_host, port=pg_port, user=pg_user, password=pg_password, db=pg_collection_name)
     engine = con.establish_connection()

@@ -81,15 +81,15 @@ def upload_to_db(input_pdf: BytesIO, pdf_meta: dict) -> int:
         """
 
     # Accessing configuration values
-    client_host = config['dbs']['qdrant']['host']
-    client_port = config['dbs']['qdrant']['port']
-    collection_name = config['dbs']['qdrant']['collection_name']
+    client_host = os.getenv('QDRANT_HOST')
+    client_port = os.getenv('QDRANT_PORT')
+    collection_name = os.getenv('QDRANT_COLLECTION')
 
-    pg_host = config['dbs']['postgres']['host']
-    pg_port = config['dbs']['postgres']['port']
-    pg_user = config['dbs']['postgres']['user']
-    pg_password = config['dbs']['postgres']['password']
-    pg_collection_name = config['dbs']['postgres']['collection_name']
+    pg_host = os.getenv('PG_HOST')
+    pg_port = os.getenv('PG_PORT')
+    pg_user = os.getenv('PG_USER')
+    pg_password = os.getenv('PG_PASSWORD')
+    pg_collection_name = os.getenv('PG_COLLECTION')
 
     embedding_size = config['embeddings']['embedding_size']
     intermediate_storage_path = config['intermediate_storage']['json_storage_path']

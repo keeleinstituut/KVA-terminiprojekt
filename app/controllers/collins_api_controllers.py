@@ -3,12 +3,6 @@ from dotenv import load_dotenv
 import os
 import json
 
-
-dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
-
-load_dotenv(dotenv_path)
-
-
 def set_headers():
 
     api_key = os.getenv('COLLINS_PASSWORD')

@@ -6,8 +6,6 @@ import os
 import jwt
 
 
-load_dotenv()
-
 class TokenController:
     def __init__(self):
         self.base_url = "https://iate.europa.eu/uac-api/oauth2/token"

@@ -17,6 +17,7 @@ from app.views.file_upload import file_upload
 from app.views.llm_view import llm_view
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+load_dotenv('.env')
 # weave.init('Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas')
 
 logging.config.fileConfig(os.getenv('LOGGER_CONFIG'), defaults={'filename': os.getenv('LOG_FILE')})

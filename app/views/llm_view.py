@@ -13,11 +13,11 @@ from utils.db_connection import Connection
 
 pn.extension("perspective")
 
-CONNECTION_PARAMS = {'host': config['dbs']['postgres']['host'],
-                     'port': config['dbs']['postgres']['port'],
-                     'user': config['dbs']['postgres']['user'],
-                     'password': config['dbs']['postgres']['password'],
-                     'db': config['dbs']['postgres']['collection_name']
+CONNECTION_PARAMS = {'host': os.getenv('PG_HOST'), 
+                     'port': os.getenv('PG_PORT'), 
+                     'user': os.getenv('PG_USER'), 
+                     'password': os.getenv('PG_PASSWORD'), 
+                     'db': os.getenv('PG_COLLECTION'), 
                      }
 
 # Configure logging
@@ -143,12 +143,13 @@ class FilterActionHandler(param.Parameterized):
 
 def llm_view():
 
-    client_host = config["dbs"]["qdrant"]["host"]
-    client_port = config["dbs"]["qdrant"]["port"]
+    client_host = os.getenv('QDRANT_HOST')
+    client_port = os.getenv('QDRANT_PORT')
 
     embedding_model = config["embeddings"]["embedding_model"]
-    collection_test = config["dbs"]["qdrant"]["collection_name"]
-    api_key = config["llm"]["api_key"]
+    collection_test = os.getenv('QDRANT_COLLECTION')
+
+    api_key = os.getenv('LLM_API_KEY')
     llm_model = config["llm"]["model"]
 
     filterfactory = FilterFactory()

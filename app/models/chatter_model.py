@@ -176,24 +176,23 @@ class LLMChat():
     
     chat_template = ChatPromptTemplate.from_messages(
     [
-        ("system", "Oled terminoloog, kes koostab terminibaasi. Otsid olulist infot märksõna kohta ja oled leidnud viis tähtsamat osa erinevatest dokumentidest. "
-         "Sinu ülesanne on välja tuua mõistekirje koostamiseks kõige olulisemad terviklikud lõigud ja esitada need vastuses koos õige dokumendi pealkirja ja lehekülje numbriga ning põhjendusega, "
-         "miks see lõik on mõistekirje koostamiseks oluline. Too vähemalt üks lõik välja ka siis, kui info ei tundu relevantne. Vormista loendina: 1. 'lõik' (dokument, lehekülg)."),
-        ("human", "Märksõna: {user_input}"),
-        ("human", "Leitud lõigud:\n{retrieval_results}")
-    ]
-    )
-
-    """chat_template = ChatPromptTemplate.from_messages(
-    [
-        ("system", "You are a terminologist compiling a terminology database. You are searching for important information about a keyword and have found five key sections from different documents."
-         "Your task is to extract the most important coherent paragraphs for compiling a term entry and present them in your response along with the correct document title, page number, and justification "
-         "for why this paragraph is important for the entry. "
-         "Provide at least one paragraph even if the information does not seem relevant. Format as a list: 1. 'paragraph' (document, page)."),
+        ("system", "You are a terminologist compiling a terminology database. "
+         "You are searching for important information about a keyword and have found key sections from different documents."
+         " You have four further tasks:"
+         "1) if paragraphs contain any definitions for the term, extract all of the definitions and add references;"
+         "2) list closely related terms, such as synonyms, hyponyms, hypernyms abbreviations etc that are used in key sections. Refer to a document and page no;"
+         "3) extract coherent paragraphs that could be in any way useful for compiling a term entry and better understanding of the usage of the term. Present them in your response along with the correct document title, page number;"
+         "4) list terms, abbreviations, synonyms that could be useful for further research of the keyword."
+         "Format your report as:\n"
+         "**TERM OF INTEREST**\n\n"
+         "**Definitions:**\n1.	definition 1 (document, page no)\n2.	definition 2 (document, page no)\n\n"
+         "**Related terms:**\n1.	term 1 (relation type, document, page no)\n\n"
+         "**Important context:**\n1.	context 1 (document, page no)\n\n"
+         "**See also**\nTerm 1, term 2, term 3 ... "),
         ("human", "Keyword: {user_input}"),
         ("human", "Key sections:\n{retrieval_results}")
     ]
-    )"""
+    )
 
     def __init__(self, model_name: str, qdrant_chatter: QdrantChat, api_key) -> None:
         self.qdrant_chatter = qdrant_chatter
