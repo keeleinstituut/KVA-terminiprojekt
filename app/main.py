@@ -8,6 +8,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import logging.config
 import os
 
+from dotenv import load_dotenv
+
 # import weave
 
 from app.models.qdrant_upload_scheduler import QdrantScheduler

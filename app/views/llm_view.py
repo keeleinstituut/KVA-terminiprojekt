@@ -11,6 +11,8 @@ from app.config import config
 from app.models.chatter_model import FilterFactory, QdrantChat, LLMChat
 from utils.db_connection import Connection
 
+import os
+
 pn.extension("perspective")
 
 CONNECTION_PARAMS = {'host': os.getenv('PG_HOST'), 
