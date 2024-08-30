@@ -1,18 +1,4 @@
 {
-    "dbs": {
-        "qdrant": {
-            "host": "ekivm",
-            "port": 6333,
-            "collection_name": "kva_test_upload"
-        },
-        "postgres": {
-            "host": "ekivm",
-            "port": 5432,
-            "collection_name": "postgres",
-            "user": "postgres",
-            "password": "postgres"
-        }
-    },
     "embeddings": {
         "embedding_model": "intfloat/multilingual-e5-large",
         "embedding_size": 1024,
@@ -21,14 +7,13 @@
         "query_prompt": "query: "
     },
     "llm": {
-        "api_key": "",
-        "model": ""
+        "model": "gpt-4o-mini"
     },
     "document_chunking": {
         "sentence_block_size": 5
     },
     "intermediate_storage": {
-        "json_storage_path": "../data/temp",
-        "finished_json_storage_path": "../data/finished"
+        "json_storage_path": "../data/temp/",
+        "finished_json_storage_path": "../data/finished/"
     }
 }
