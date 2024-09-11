@@ -77,5 +77,4 @@ def json_to_df_with_definitions_and_usages(query):
             'Näide': extract_verbal_illustrations(result_value.get('def', []))
         }
         rows.append(row)
-
     return pd.DataFrame(rows)

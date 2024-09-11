@@ -5,6 +5,12 @@ import requests
 from app.controllers.iate_api_controllers import perform_single_search, get_single_entity_by_href
 from app.controllers.token_controller import TokenController
 import pandas as pd
+import logging
+
+
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
+
 
 token_controller = TokenController()
 
@@ -103,21 +109,20 @@ def process_entry(entry, domains, target_languages):
     return processed_entries
 
 def search_results_to_dataframe(query, source_languages, target_languages, only_first_batch, optional_parameters):
-
     with requests.Session() as session:
         access_token = token_controller.get_access_token()
         results_list = []
 
         results = perform_single_search(access_token, query, source_languages, target_languages, only_first_batch, session=session, **optional_parameters)
 
-        script_dir = os.path.dirname(__file__)
-        data_path = os.path.join(script_dir, '..', 'data', 'domains.json')
+        data_path = '/app/data/domains.json'
 
         with open(data_path, 'r', encoding='utf-8') as file:
             domains = json.load(file)
 
         for r in results:
             if 'self' in r:
+                
                 entry = get_single_entity_by_href(access_token, r['self']['href'], session=session)
 
                 processed_entries = process_entry(entry, domains, target_languages)

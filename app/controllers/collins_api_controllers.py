@@ -2,6 +2,11 @@ import requests
 from dotenv import load_dotenv
 import os
 import json
+import logging
+
+
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 
 def set_headers():
 
@@ -22,7 +27,7 @@ def get_dictionaries(headers):
         dictionaries = response.json()
         return dictionaries
     except Exception as e:
-        print(f"Failed to retrieve dictionaries: {e}")
+        logger.info(f"Failed to retrieve dictionaries: {e}")
         return []
 
 
@@ -30,12 +35,14 @@ def get_search_results(dict_code, search_word, page_size, page_index):
     headers = set_headers()
 
     url = f'https://api.collinsdictionary.com/api/v1/dictionaries/{dict_code}/search/?q={search_word}&pagesize={page_size}&pageindex={page_index}'
+
+    logger.info(f'Collins {dict_code} request URL: {url}')
     try:
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"Failed to retrieve search results: {e}")
+        logger.info(f"Failed to retrieve search results: {e}")
         return {}
 
 
@@ -48,7 +55,7 @@ def get_first_matching_entry(dict_code, search_word):
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"Failed to retrieve first/best mathicng entry: {e}")
+        logger.info(f"Failed to retrieve first/best matching entry: {e}")
         return {}
     
 
@@ -67,7 +74,7 @@ def get_entry_by_entry_url(entry_url):
         response.raise_for_status()
         return response.json()
     except Exception as e:
-        print(f"Failed to retrieve entry: {e}")
+        logger.info(f"Failed to retrieve entry: {e}")
         return None
     
 
@@ -81,5 +88,5 @@ def get_did_you_mean(dict_code, search_word, entry_number):
         dictionaries = response.json()
         return dictionaries
     except Exception as e:
-        print(f"Failed to retrieve suggestions: {e}")
+        logger.info(f"Failed to retrieve suggestions: {e}")
         return []

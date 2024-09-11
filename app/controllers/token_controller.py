@@ -4,6 +4,12 @@ from urllib.parse import urlencode
 from dotenv import load_dotenv
 import os
 import jwt
+from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+import logging
+
+
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 
 
 class TokenController:
@@ -35,9 +41,14 @@ class TokenController:
             tokens = response.json()['tokens'][0]
             self.access_token = tokens.get('access_token')
             self.refresh_token = response.json().get('refresh_token')
-
-            decoded_token = jwt.decode(tokens.get('access_token'), options={"verify_signature": False})
-            token_expiration_time = decoded_token['exp']
+            try:
+                decoded_token = jwt.decode(tokens.get('access_token'), options={"verify_signature": False}, algorithms=["HS256"])
+            except jwt.ExpiredSignatureError:
+                logger.info("Token has expired")
+            except jwt.InvalidTokenError:
+                logger.info("Invalid token")
+            except Exception as e:
+                logger.info(f"Error decoding token: {e}")
             return tokens
         else:
             return {'error': 'Failed to retrieve tokens', 'details': response.text}
@@ -66,7 +77,7 @@ class TokenController:
             self.refresh_token = response.json().get('refresh_token')
             return tokens
         else:
-            print(f"Failed to refresh tokens: {response.status_code} {response.text}")
+            logger.info(f"Failed to refresh tokens: {response.status_code} {response.text}")
             return {'error': 'Failed to refresh tokens', 'details': response.text}
 
     def get_access_token(self):

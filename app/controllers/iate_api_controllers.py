@@ -1,10 +1,18 @@
 import requests
 import json
 from .token_controller import TokenController
+import logging
+
+
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 
 token_controller = TokenController()
 
 def perform_single_search(access_token, query, source, targets, only_first_batch=False, session=None, **kwargs):
+
+    logger.info('Perform IATE single search')
+
     url = "https://iate.europa.eu/em-api/entries/_search"
 
     headers = {
@@ -37,7 +45,7 @@ def perform_single_search(access_token, query, source, targets, only_first_batch
         
         data = response.json()
 
-        print(f"Response size: {data['size']}")
+        logger.debug(f"IATE response size: {data['size']}")
 
         items = data.get('items', [])
 
@@ -46,7 +54,7 @@ def perform_single_search(access_token, query, source, targets, only_first_batch
 
         all_results.extend(items)
 
-        print(f"Batch size: {len(items)}, Total fetched so far: {len(all_results)}")
+        logger.debug(f"IATE batch size: {len(items)}, Total fetched so far: {len(all_results)}")
 
         if only_first_batch:
             break
@@ -57,12 +65,14 @@ def perform_single_search(access_token, query, source, targets, only_first_batch
 
         current_url = next_link
 
-    print(f"Total size: {len(all_results)}")
-
+    
     return all_results
 
 
 def get_single_entity_by_href(access_token, href, session):
+
+    logger.info(f'IATE request URL: {href}')
+
     access_token = token_controller.get_access_token()
     headers = {
         'Authorization': f'Bearer {access_token}',

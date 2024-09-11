@@ -4,6 +4,11 @@ from utils.collins_api_helpers import entry_data_to_dataframe, entry_cobuild_dat
 from utils.iate_api_helpers import search_results_to_dataframe
 from utils.mw_api_helpers import json_to_df_with_definitions_and_usages
 import time
+import logging
+
+
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 
 pn.extension('tabulator')
 
@@ -17,6 +22,8 @@ css = """
 pn.config.raw_css.append(css)
 
 def on_click(event):
+    logger.info('API search button clicked.')
+
     query = query_input.value
     source_language = source_language_input.value
     target_languages = target_languages_input.value
@@ -28,6 +35,8 @@ def on_click(event):
         response_area.append(pn.pane.Markdown("**Viga**: Kõik väljad peavad olema täidetud"))
         return
 
+    fetch_button.disabled = True
+
     optional_parameters = {
         'query_operator': query_operator,
         'search_in_fields': search_in_fields
@@ -35,7 +44,9 @@ def on_click(event):
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
         query, source_language, target_languages, only_first_batch_value, optional_parameters)
-        
+
+    fetch_button.disabled = False
+
     response_area.clear()
 
     html_columns = {
@@ -105,15 +116,38 @@ def on_click(event):
     response_area.append(tabs)
 
 def fetch_results(query, source_language, target_languages, only_first_batch, optional_parameters):
-    iate_results = search_results_to_dataframe(query, source_language, target_languages, only_first_batch, optional_parameters)
 
-    collins_english_results = entry_data_to_dataframe('english', query, 100, 1)
+    logger.info('Started fetching results from IATE and dictionaries.')
 
-    collins_cobuild_advanced_british_results = entry_cobuild_data_to_dataframe('english-learner', query, 100, 1)
+    try:
+        iate_results = search_results_to_dataframe(query, source_language, target_languages, only_first_batch, optional_parameters)
+    except Exception as e:
+        logger.warning(f'Error fetching results from IATE: {e}')
+        iate_results = pd.DataFrame()
 
-    collins_cobuild_advanced_american_results = entry_cobuild_data_to_dataframe('american-learner', query, 100, 1)
+    try:
+        collins_english_results = entry_data_to_dataframe('english', query, 100, 1)
+    except Exception as e:
+        logger.warning(f'Error fetching results from Collins English: {e}')
+        collins_english_results = pd.DataFrame()
 
-    mw_dict_results = json_to_df_with_definitions_and_usages(query)
+    try:
+        collins_cobuild_advanced_british_results = entry_cobuild_data_to_dataframe('english-learner', query, 100, 1)
+    except Exception as e:
+        logger.warning(f'Error fetching results from Collins Cobuild Advanced British: {e}')
+        collins_cobuild_advanced_british_results = pd.DataFrame()
+
+    try:
+        collins_cobuild_advanced_american_results = entry_cobuild_data_to_dataframe('american-learner', query, 100, 1)
+    except Exception as e:
+        logger.warning(f'Error fetching results from Collins Cobuild Advanced American: {e}')
+        collins_cobuild_advanced_american_results = pd.DataFrame()
+
+    try:
+        mw_dict_results = json_to_df_with_definitions_and_usages(query)
+    except Exception as e:
+        logger.warning(f'Error fetching results from Merriam Webster: {e}')
+        mw_dict_results = pd.DataFrame()
 
     return iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results
 
@@ -234,6 +268,7 @@ input_widgets = pn.WidgetBox(
 collapsible_input = pn.Card(input_widgets, title='Otsing', collapsible=True, collapsed=False, margin=(20, 0))
 
 def api_view():
+
     return pn.Column(collapsible_input, response_area)
 
 api_view().servable()

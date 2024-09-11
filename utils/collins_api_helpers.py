@@ -50,7 +50,6 @@ def entry_data_to_dataframe(dict_code, search_word, page_size, page_index):
                     })
 
     df = pd.DataFrame(data)
-    
     return df
 
 
