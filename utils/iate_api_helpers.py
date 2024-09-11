@@ -2,11 +2,10 @@ import os
 import time
 import json
 import requests
-from app.controllers.iate_api_controllers import perform_single_search, get_single_entity_by_href
+from app.controllers.iate_api_controllers import perform_single_search, get_single_entity_by_href, get_iate_domains
 from app.controllers.token_controller import TokenController
 import pandas as pd
 import logging
-
 
 logger = logging.getLogger('app')
 logger.setLevel(logging.INFO)
@@ -108,17 +107,12 @@ def process_entry(entry, domains, target_languages):
 
     return processed_entries
 
-def search_results_to_dataframe(query, source_languages, target_languages, only_first_batch, optional_parameters):
+def search_results_to_dataframe(query, source_languages, target_languages, only_first_batch, optional_parameters, domains):
     with requests.Session() as session:
         access_token = token_controller.get_access_token()
         results_list = []
 
         results = perform_single_search(access_token, query, source_languages, target_languages, only_first_batch, session=session, **optional_parameters)
-
-        data_path = '/app/data/domains.json'
-
-        with open(data_path, 'r', encoding='utf-8') as file:
-            domains = json.load(file)
 
         for r in results:
             if 'self' in r:
@@ -145,3 +139,17 @@ def get_domain_hierarchy_by_code(data, domain_code, hierarchy=None):
                 return subdomain_result
     
     return None
+
+
+def initialize_domains():
+    logger.info("Fetching domains from IATE API...")
+    session = requests.Session()
+    access_token = token_controller.get_access_token()
+    domains = get_iate_domains(access_token, session)
+
+    if isinstance(domains, dict):
+        logger.info("Domains fetched successfully.")
+        return domains
+    else:
+        logger.warning(f"Error fetching domains from IATE API: {domains}")
+        return None

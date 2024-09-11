@@ -17,6 +17,7 @@ from app.views.api_view import api_view
 from app.views.chat_view import chat_view
 from app.views.file_upload import file_upload
 from app.views.llm_view import llm_view
+from utils import iate_api_helpers
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 load_dotenv('.env')
@@ -31,8 +32,11 @@ scheduler = QdrantScheduler.get_instance()
 class TerminologyApp():
 
     def __init__(self):
+
+        self.domains = iate_api_helpers.initialize_domains()
+
         file_upload_area = pn.Column(file_upload())
-        api_view_area = pn.Column(api_view())
+        api_view_area = pn.Column(api_view(self))
         chat_view_area = pn.Column(llm_view())
 
         tabs = pn.Tabs(
@@ -46,12 +50,17 @@ class TerminologyApp():
             main=[tabs],
             sidebar_width=300
         )
+    
+    def get_domains(self):
+        return self.domains
 
 
 def create_app():
     app = TerminologyApp()
-    return app.template
+    return app.template, app
 
 
 if __name__ == '__main__':
-    pn.serve({'/': create_app()}, port=int(os.getenv('PANEL_PORT')))
+    template, app = create_app()
+    pn.serve({'/': template}, port=int(os.getenv('PANEL_PORT')))
+

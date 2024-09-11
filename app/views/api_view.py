@@ -21,7 +21,7 @@ css = """
 """
 pn.config.raw_css.append(css)
 
-def on_click(event):
+def on_click(event, app):
     logger.info('API search button clicked.')
 
     query = query_input.value
@@ -43,7 +43,7 @@ def on_click(event):
     }
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
-        query, source_language, target_languages, only_first_batch_value, optional_parameters)
+        query, source_language, target_languages, only_first_batch_value, optional_parameters, app.domains)
 
     fetch_button.disabled = False
 
@@ -115,12 +115,12 @@ def on_click(event):
 
     response_area.append(tabs)
 
-def fetch_results(query, source_language, target_languages, only_first_batch, optional_parameters):
+def fetch_results(query, source_language, target_languages, only_first_batch, optional_parameters, domains):
 
     logger.info('Started fetching results from IATE and dictionaries.')
 
     try:
-        iate_results = search_results_to_dataframe(query, source_language, target_languages, only_first_batch, optional_parameters)
+        iate_results = search_results_to_dataframe(query, source_language, target_languages, only_first_batch, optional_parameters, domains)
     except Exception as e:
         logger.warning(f'Error fetching results from IATE: {e}')
         iate_results = pd.DataFrame()
@@ -251,24 +251,22 @@ fetch_button = pn.widgets.Button(name='Otsi', button_type='primary', width=100)
 
 response_area = pn.Column()
 
-fetch_button.on_click(on_click)
 
-input_widgets = pn.WidgetBox(
-    query_input,
-    source_language_input,
-    target_languages_input,
-    search_in_fields_label,
-    search_in_fields_input,
-    query_operator_input,
-    only_first_batch_checkbox,
-    fetch_button,
-    sizing_mode='stretch_width'
-)
+def api_view(app):
+    fetch_button.on_click(lambda event: on_click(event, app))
 
-collapsible_input = pn.Card(input_widgets, title='Otsing', collapsible=True, collapsed=False, margin=(20, 0))
+    input_widgets = pn.WidgetBox(
+        query_input,
+        source_language_input,
+        target_languages_input,
+        search_in_fields_label,
+        search_in_fields_input,
+        query_operator_input,
+        only_first_batch_checkbox,
+        fetch_button,
+        sizing_mode='stretch_width'
+    )
 
-def api_view():
+    collapsible_input = pn.Card(input_widgets, title='Otsing', collapsible=True, collapsed=False, margin=(20, 0))
 
     return pn.Column(collapsible_input, response_area)
-
-api_view().servable()

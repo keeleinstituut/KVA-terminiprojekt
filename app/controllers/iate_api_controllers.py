@@ -88,3 +88,26 @@ def get_single_entity_by_href(access_token, href, session):
         return response.json()
     else:
         return response.status_code
+
+
+def get_iate_domains(access_token, session):
+
+    url = 'https://iate.europa.eu/em-api/domains/_tree'
+
+    logger.info(f'Get IATE domains: {url}')
+
+    access_token = token_controller.get_access_token()
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Accept': 'application/json'
+    }
+
+    if session:
+        response = session.get(url, headers=headers)
+    else:
+        response = requests.get(url, headers=headers)
+
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return response.status_code
