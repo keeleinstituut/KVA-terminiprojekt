@@ -131,8 +131,8 @@ class QdrantChat():
 
         # Assemble response string
         response = ''
-        for result in zip(results['response_text'], results['filename'], results['page_no']):
-            response += f'File: {result[1]}\nPage: {result[2]}\n\n{result[0]}\n{"*"*15}\n'
+        for result in zip(results['response_text'], results['title'], results['page_no']):
+            response += f'Title: {result[1]}\nPage: {result[2]}\n\n{result[0]}\n{"*"*15}\n'
 
         return response
 
@@ -168,6 +168,7 @@ class QdrantChat():
             result_dict['score'].append(point.score)
             result_dict['filename'].append(point.payload["filename"])
             result_dict['page_no'].append(point.payload["page_number"])
+            result_dict['title'].append(point.payload["title"])
 
         return result_dict
     
@@ -232,6 +233,6 @@ class LLMChat():
         """ A callback function for handling user input and generating responses. """
         await asyncio.sleep(1.8)
         context = await self.qdrant_chatter.chat_callback(contents, '', '')
-        prompt = self.chat_template.format_messages(user_input={contents}, retrieval_results={context})
+        prompt = self.chat_template.format_messages(user_input=contents, retrieval_results=context)
         response = self.llm.invoke(prompt)
         return response.content   
