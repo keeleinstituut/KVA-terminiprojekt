@@ -195,13 +195,14 @@ class LLMChat():
     ]
     )
 
-    def __init__(self, model_name: str, qdrant_chatter: QdrantChat, api_key) -> None:
+    def __init__(self, model_name: str, qdrant_chatter: QdrantChat, api_key, chat_template=chat_template) -> None:
         self.qdrant_chatter = qdrant_chatter
         self.model_name = model_name
         self.temperature = 0
         self.max_retries = 2
         self.api_key = api_key
         self.llm = self.connect_language_model()
+        self.chat_template = chat_template
 
     def connect_language_model(self):
 
