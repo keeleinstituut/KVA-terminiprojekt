@@ -127,14 +127,15 @@ def upload_to_db(input_pdf: BytesIO, pdf_meta: dict) -> int:
     'author': pdf_meta['author'].strip(),
     'languages': pdf_meta['languages'],
     'field_keywords': pdf_meta['keywords'],
+    'url': pdf_meta['url'].strip(),
     'is_valid': pdf_meta['is_valid']
     }
     
     try:
         logger.info("Inserting file metadata into 'documents'.")
         # Inital postgres entry
-        query = """ INSERT INTO documents (pdf_filename, json_filename, title, publication, year, author, languages, is_valid, current_state) 
-        VALUES (:fname, :json_fname, :title, :publication, :year, :author, :languages, :is_valid, :current_state)
+        query = """ INSERT INTO documents (pdf_filename, json_filename, title, publication, year, author, languages, is_valid, current_state, url) 
+        VALUES (:fname, :json_fname, :title, :publication, :year, :author, :languages, :is_valid, :current_state, :url)
         RETURNING documents.id """
         data = [{'fname': document_data['filename'], 
             'json_fname': document_data['json_filename'], 
@@ -144,6 +145,7 @@ def upload_to_db(input_pdf: BytesIO, pdf_meta: dict) -> int:
             'author': document_data['author'], 
             'languages': document_data['languages'],
             'is_valid': document_data['is_valid'], 
+            'url': document_data['url'], 
             'current_state': 'processing'}]   
         result = con.execute_sql(query, data)
         doc_id = result['data'][0][0]

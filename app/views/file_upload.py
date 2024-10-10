@@ -21,7 +21,8 @@ DEFAULT_METADATA = {"publication": "",
               "author": "",
               "languages": [],
               "keywords": [],
-              "is_valid": False}
+              "is_valid": False,
+              "url": ""}
 
 class DataHandler():
     """
@@ -45,6 +46,7 @@ class DataHandler():
             "author": pn.widgets.TextInput(name='Autor'),
             "languages": pn.widgets.TextInput(name='Keeled', description='Eralda keeled komadega'),
             "keywords": pn.widgets.TextInput(name='Märksõnad', description='Eralda märksõnad komadega'),
+            "url": pn.widgets.TextInput(name='Veebilink'),
             "is_valid": pn.widgets.Checkbox(name='Kehtetu', value=False)}
             )
         
