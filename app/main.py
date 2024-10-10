@@ -14,7 +14,6 @@ from dotenv import load_dotenv
 
 from app.models.qdrant_upload_scheduler import QdrantScheduler
 from app.views.api_view import api_view
-from app.views.chat_view import chat_view
 from app.views.file_upload import file_upload
 from app.views.llm_view import llm_view
 from utils import iate_api_helpers
