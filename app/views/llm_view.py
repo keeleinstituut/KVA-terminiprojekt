@@ -164,17 +164,15 @@ def llm_view():
 
     filter_handler = FilterActionHandler(chatter.filterfactory)
 
-    toggle = pn.widgets.Toggle(name='Kuva filtrid', button_type='primary', width=50)
+    toggle = pn.widgets.ToggleIcon(icon='adjustments', active_icon='adjustments-off', size='4em', align='end')
 
     # Callback to show/hide the filters
     @param.depends(toggle.param.value, watch=True)
     def toggle_filters(show):
         if show:
             filter_column.visible = True
-            toggle.name = 'Peida filtrid'
         else:
             filter_column.visible = False
-            toggle.name = 'Kuva filtrid'
 
     ci = ChatInterface(
         callback_exception='verbose',
