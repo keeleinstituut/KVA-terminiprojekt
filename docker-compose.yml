@@ -8,8 +8,8 @@ services:
       POSTGRES_PASSWORD: 'postgres'
       POSTGRES_USER: 'postgres'
     volumes:
-      - /home/sandra/storage/pg_storage:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - /local/pg_storage/path:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -23,7 +23,18 @@ services:
       - 6334
       - 6335
     volumes:
-      - /home/sandra/storage/qdrant_storage:/qdrant/storage
+      - /local/qdrant_storage/path:/qdrant/storage
+
+  terms:
+    image: ghcr.io/eisandra/kva-terminiprojekt:latest
+    restart: always
+    env_file: "./.env"
+    ports:
+      - "5006:5006"
+    expose:
+      - 5006
+    volumes:
+      - local/authentication_credentials/file.json:/app/config/credentials.json
 
 volumes:
   database_data:
@@ -31,5 +42,4 @@ volumes:
 
 configs:
   qdrant_config:
-    content: |
-      log_level: INFO
+    file: ./qdrant_config.yaml

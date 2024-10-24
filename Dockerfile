@@ -16,7 +16,7 @@ EXPOSE 5006
 ENV PANEL_PORT=5006
 ENV APP_CONFIG=../config/config.json
 ENV LOGGER_CONFIG=../config/logging.config
-ENV LOG_FILE=../logs/app.log  
+ENV LOG_FILE=../logs/app.log
 
 COPY config /app/config
 COPY db /app/db
@@ -29,7 +29,5 @@ RUN ls -l
 WORKDIR /app/app
 
 # Run the command to start the application
-#CMD ["panel", "serve", "main.py", "--port", "5006", "--allow-websocket-origin", "*"]
-CMD ["python", "main.py"]
-
-
+ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "4"]
+CMD ["--cookie-secret", "my_super_safe_cookie_secret_2", "--basic-auth", "../config/credentials.json"]
