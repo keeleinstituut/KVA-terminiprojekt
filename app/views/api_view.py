@@ -43,7 +43,7 @@ def on_click(event, app):
     }
 
     iate_results, collins_english_results, collins_cobuild_advanced_british_results, collins_cobuild_advanced_american_results, mw_dict_results = fetch_results(
-        query, source_language, target_languages, only_first_batch_value, optional_parameters, app.domains)
+        query, source_language, target_languages, only_first_batch_value, optional_parameters, app)
 
     fetch_button.disabled = False
 
