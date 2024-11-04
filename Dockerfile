@@ -1,5 +1,5 @@
 # Use the official Python image as the base image
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 # Set the working directory in the container
 WORKDIR /app
@@ -29,5 +29,5 @@ RUN ls -l
 WORKDIR /app/app
 
 # Run the command to start the application
-ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "4"]
+ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "1"]
 CMD ["--cookie-secret", "my_super_safe_cookie_secret_2", "--basic-auth", "../config/credentials.json"]
