@@ -41,6 +41,7 @@ def perform_single_search(access_token, query, source, targets, only_first_batch
             response = requests.post(current_url, headers=headers, data=json_payload)
 
         if response.status_code != 200:
+            logger.info(f'{response.status_code}: {response.headers}')
             return {'error': 'Failed to perform search', 'details': response.text}
         
         data = response.json()
