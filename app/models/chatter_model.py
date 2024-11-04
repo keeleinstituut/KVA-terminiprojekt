@@ -177,19 +177,49 @@ class LLMChat():
     
     chat_template = ChatPromptTemplate.from_messages(
     [
-        ("system", "You are a terminologist compiling a terminology database. "
-         "You are searching for important information about a keyword and have found key sections from different documents."
-         " You have four further tasks:"
-         "1) if paragraphs contain any definitions for the term, extract all of the definitions and add references;"
-         "2) list closely related terms, such as synonyms, hyponyms, hypernyms abbreviations etc that are used in key sections. Refer to a document and page no;"
-         "3) extract coherent paragraphs that could be in any way useful for compiling a term entry and better understanding of the usage of the term. Present them in your response along with the correct document title, page number;"
-         "4) list terms, abbreviations, synonyms that could be useful for further research of the keyword."
-         "Format your report as:\n"
-         "**TERM OF INTEREST**\n\n"
-         "**Definitions:**\n1.	definition 1 (document, page no)\n2.	definition 2 (document, page no)\n\n"
-         "**Related terms:**\n1.	term 1 (relation type, document, page no)\n\n"
-         "**Important context:**\n1.	context 1 (document, page no)\n\n"
-         "**See also**\nTerm 1, term 2, term 3 ... "),
+        ("system", 
+        """
+**Role:** You are a terminologist searching for terminological information about a keyword. 
+ 
+**Objective:** You've collected key sections from various documents about the keyword. Your task is to analyze these sections in order to create a comprehensive term entry. ALWAYS use EXACT QUOTES unless otherwise stated. 
+
+**Instructions:**  Extract and organize terminological information as follows:
+ 
+	1. "Keyword Variants":
+	    Note any spelling or form variations of the keyword (e.g., "defence" and "defense") found in the text.
+	2. "Definitons"
+	    Extract ALL useful definitions. Keep original wording and include all relevant information. 
+        Keep source identifiers, if a definition is exactly the same in multiple documents, include all of the sources. 
+	3. "Related terms and lexical relations"
+        When mentioned in retrieved passages, identify:
+        - Abbreviations 
+        - Broader term (keyword is a type/part/subcategory of a broader term) 
+        - Narrower term (narrower term is a type/part/subcategory of the keyword)
+        - Other related terms (frequently appearing in same contexts)
+        Keep original wording and source identifiers.
+	4. "Usage evidence"
+	    From the retrieved passages find paragraphs that contain the keyword and help to identify domain-specific applications or characteristic patterns of use of the term. The output paragraph must be coherent and must include the keyword. Keep original wording and source identifiers.
+	5. "See also"
+	    Identify terms, abbreviations, or synonyms that may be useful for further exploration of the keyword. These don't necessarily have to be mentioned in key sections.
+
+**Output Format:**
+ 
+	**[INSERT TERM OF INTEREST]**
+	 
+	**Keyword Variants:**: Variant 1; Variant 2; etc.
+	 
+	**Definitions:**
+		1. Definition text (Document title, Page no)
+		2. Additional definitions as found. (Document title, Page no)
+	 
+	**Related Terms**
+		1. Related term (Relation type, Document title, Page no)
+	 
+	**Usage evidence**
+	           1. Contextual paragraph text (Document title, Page no)
+	 
+    **See Also:**  [Insert terms, abbreviations, or synonyms, separate terms using semicolons]
+        """),
         ("human", "Keyword: {user_input}"),
         ("human", "Key sections:\n{retrieval_results}")
     ]
@@ -230,10 +260,11 @@ class LLMChat():
         return llm
         
     # @weave.op()
-    async def chat_callback(self, contents: str, user, instance) -> str:
+    async def chat_callback(self, contents: str,):
         """ A callback function for handling user input and generating responses. """
         await asyncio.sleep(1.8)
         context = await self.qdrant_chatter.chat_callback(contents, '', '')
         prompt = self.chat_template.format_messages(user_input=contents, retrieval_results=context)
+        logger.info('Starting LLM query.')
         response = self.llm.invoke(prompt)
         return response.content   
