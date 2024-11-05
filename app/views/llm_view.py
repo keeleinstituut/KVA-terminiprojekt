@@ -1,9 +1,9 @@
+import asyncio
 import logging
-from collections import defaultdict
 
 import panel as pn
 import param
-from panel.chat import ChatInterface
+from panel.chat import ChatInterface, ChatMessage
 
 import pandas as pd
 
@@ -67,7 +67,7 @@ class FilterActionHandler(param.Parameterized):
                                                 options=[], size=8, width=500)
 
         self.limit_slider = pn.widgets.EditableIntSlider(
-            name='Vastuste arv', start=1, end=20, step=1, value=5, width=500)
+            name='Tekstilõikude arv SKMi sisendis', start=1, end=20, step=1, value=5, width=500)
 
         self.validity_checkbox = pn.widgets.Checkbox(
             name='Otsi ainult kehtivatest', width=500)
@@ -174,18 +174,50 @@ def llm_view():
         else:
             filter_column.visible = False
 
+
+    text_area_input = pn.widgets.TextAreaInput(
+        placeholder="Otsi dokumendist", auto_grow=True, max_rows=1
+    )
+
+    def text_area_event_handler(event):
+        if event.new.endswith('\n'):  # Check if enter key was pressed
+            asyncio.create_task(answer(text_area_input.value_input, text_area_input))
+
+
+    async def answer(contents, active_widget):
+                
+        # Empty input field
+        active_widget.param.update({"value": "", "value_input": ""})
+
+        # Loading spinner as a placeholder for the response
+        spinner = pn.indicators.LoadingSpinner(value=True, size=30)
+        placeholder = pn.pane.Placeholder(ChatMessage(user="Assistent", object=spinner, show_reaction_icons=False, show_timestamp=False)) # Loading placeholedr until LLM responds
+
+        # Generate messages
+        ci.append(ChatMessage(contents, user="Terminoloog", show_reaction_icons=False))
+        ci.append(placeholder)
+
+        response = await llm_chatter.chat_callback(contents)
+        placeholder.update(ChatMessage(response, user="Assistent", show_reaction_icons=False))
+
     ci = ChatInterface(
         callback_exception='verbose',
-        callback=llm_chatter.chat_callback,
-        widgets=pn.widgets.TextAreaInput(
-            placeholder="Otsi dokumendist", auto_grow=True, max_rows=1
-        ),
-        user="Terminoloog", callback_user="Assistent",
+        widgets=text_area_input,
+        user="Terminoloog",
+        show_send=False,
+        reset_on_send=True,
         show_stop=False,
         show_rerun=False,
         show_undo=False,
-        button_properties={"send": {"name": "Saada"}}
-    )
+        show_clear=False,
+        )
+
+    ci.button_properties = {"Saada": {"icon": "send", "callback": lambda i, e: asyncio.create_task(answer(ci.active_widget.value_input, ci.active_widget))},
+                            "Tühjenda": {"icon": "trash", "callback": ci._click_clear}}
+    
+    # Attach handler to the TextAreaInput's value
+    text_area_input.param.watch(text_area_event_handler, 'value_input')
+        
 
     try:
 
