@@ -178,6 +178,8 @@ def upload_to_qdrant() -> None:
     pg_collection_name = os.getenv('PG_COLLECTION')
 
     con = Connection(host=pg_host, port=pg_port, user=pg_user, password=pg_password, db=pg_collection_name)
+    con.establish_connection()
+
     logger.info(f'Established Postgres connection')
 
     client = QdrantClient(client_host, port=client_port, prefer_grpc=True)
