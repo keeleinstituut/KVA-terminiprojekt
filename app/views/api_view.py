@@ -19,8 +19,6 @@ css = """
     text-overflow: ellipsis !important;
 }
 """
-pn.config.raw_css.append(css)
-
 
 def fetch_results(query, source_language, target_languages, only_first_batch, optional_parameters, domains):
 
@@ -217,6 +215,8 @@ class APIViewWidgets(param.Parameterized):
 
 
 def api_view(app):
+    
+    pn.config.raw_css.append(css)
 
     widget_handler = APIViewWidgets(app)
 
