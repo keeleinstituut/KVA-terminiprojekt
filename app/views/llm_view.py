@@ -185,20 +185,24 @@ def llm_view():
 
 
     async def answer(contents, active_widget):
+        contents = contents.rstrip('\n')
                 
         # Empty input field
         active_widget.param.update({"value": "", "value_input": ""})
 
         # Loading spinner as a placeholder for the response
         spinner = pn.indicators.LoadingSpinner(value=True, size=30)
-        placeholder = pn.pane.Placeholder(ChatMessage(user="Assistent", object=spinner, show_reaction_icons=False, show_timestamp=False)) # Loading placeholedr until LLM responds
+        placeholder = pn.pane.Placeholder(ChatMessage(user="Assistent", object=spinner, 
+                                                      show_reaction_icons=False,
+                                                      show_timestamp=False,
+                                                      show_copy_icon=False)) # Loading placeholedr until LLM responds
 
         # Generate messages
-        ci.append(ChatMessage(contents, user="Terminoloog", show_reaction_icons=False))
+        ci.append(ChatMessage(contents, user="Terminoloog", show_reaction_icons=False, show_copy_icon=False))
         ci.append(placeholder)
 
         response = await llm_chatter.chat_callback(contents)
-        placeholder.update(ChatMessage(response, user="Assistent", show_reaction_icons=False))
+        placeholder.update(ChatMessage(response, user="Assistent", show_reaction_icons=False, show_copy_icon=False))
 
     ci = ChatInterface(
         callback_exception='verbose',
