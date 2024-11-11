@@ -101,7 +101,7 @@ class FilterActionHandler(param.Parameterized):
         """ Refreshes the options for the keyword and document title selectors by utilizing previous methods. 
         Responds to clicking refresh_choices_button. """
         logger.info(
-            f'Refreshing file selection. Established Postgres connection')
+            'Refreshing file selection. Established Postgres connection')
 
         # Refreshing file list
         try:
@@ -160,7 +160,7 @@ def llm_view():
     llm_chatter = LLMChat(llm_model, chatter, api_key)
 
     chatter.connect(client_host, client_port)
-    logger.info(f'Established Qdrant connection')
+    logger.info('Established Qdrant connection')
 
     filter_handler = FilterActionHandler(chatter.filterfactory)
 
@@ -185,41 +185,29 @@ def llm_view():
 
 
     async def answer(contents, active_widget):
-        contents = contents.rstrip('\n')
-                
-        # Empty input field
+        contents = contents.strip('\n')
         active_widget.param.update({"value": "", "value_input": ""})
-
-        # Loading spinner as a placeholder for the response
-        spinner = pn.indicators.LoadingSpinner(value=True, size=30)
-        placeholder = pn.pane.Placeholder(ChatMessage(user="Assistent", object=spinner, 
-                                                      show_reaction_icons=False,
-                                                      show_timestamp=False,
-                                                      show_copy_icon=False)) # Loading placeholedr until LLM responds
-
-        # Generate messages
-        ci.append(ChatMessage(contents, user="Terminoloog", show_reaction_icons=False, show_copy_icon=False))
-        ci.append(placeholder)
-
-        response = await llm_chatter.chat_callback(contents)
-        placeholder.update(ChatMessage(response, user="Assistent", show_reaction_icons=False, show_copy_icon=False))
+        # Empty input field
+        ci.send(ChatMessage(contents, user="Terminoloog", show_reaction_icons=False, show_copy_icon=False), 
+                callback=True)
 
     ci = ChatInterface(
         callback_exception='verbose',
         widgets=text_area_input,
         user="Terminoloog",
-        show_send=False,
+        show_send=True,
+        show_button_name=False,
+        callback=llm_chatter.chat_callback,
+        callback_user='Assistent',
         reset_on_send=True,
         show_stop=False,
         show_rerun=False,
         show_undo=False,
-        show_clear=False,
-        )
-
-    ci.button_properties = {"Saada": {"icon": "send", "callback": lambda i, e: asyncio.create_task(answer(ci.active_widget.value_input, ci.active_widget))},
-                            "Tühjenda": {"icon": "trash", "callback": ci._click_clear}}
-    
-    # Attach handler to the TextAreaInput's value
+        show_copy_icon=False,
+        sizing_mode="stretch_width",
+        reaction_icons = {})
+ 
+     # Attach handler to the TextAreaInput's value
     text_area_input.param.watch(text_area_event_handler, 'value_input')
         
 
