@@ -7,10 +7,7 @@
         "query_prompt": "query: "
     },
     "llm": {
-        "model": "gpt-4o-mini"
-    },
-    "document_chunking": {
-        "sentence_block_size": 5
+        "model": "gpt-4o"
     },
     "intermediate_storage": {
         "json_storage_path": "../data/temp/",
