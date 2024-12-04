@@ -9,7 +9,6 @@ COPY requirements.txt /app/
 
 # Install the Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-RUN python -m spacy download en_core_web_sm
 
 EXPOSE 5006
 
@@ -29,5 +28,5 @@ RUN ls -l
 WORKDIR /app/app
 
 # Run the command to start the application
-ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "1"]
+ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "1", "--websocket-max-message-size", "157286400"]
 CMD ["--cookie-secret", "my_super_safe_cookie_secret_2", "--basic-auth", "../config/credentials.json"]
