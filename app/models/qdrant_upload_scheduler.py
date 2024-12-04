@@ -7,29 +7,43 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.controllers.qdrant_upload_controller import upload_to_qdrant
 
 # Configure logging
-logger = logging.getLogger('app')
+logger = logging.getLogger("app")
 logger.setLevel(logging.INFO)
+
 
 def job_listener(event):
     if event.exception:
         logger.error('The job "upload_to_qdrant" crashed.')
 
+
 class QdrantScheduler:
+    """
+    A singleton class for managing and scheduling background jobs,
+    Specifically designed to handle periodic tasks related to Qdrant, such as uploading data.
+
+    Attributes:
+        _instance (BackgroundScheduler): A static instance of the scheduler that ensures only one scheduler is active.
+    """
+
     _instance = None
 
     @staticmethod
     def get_instance():
         if QdrantScheduler._instance is None:
-            logger.info('QdrantScheduler initialization')
+            logger.info("QdrantScheduler initialization")
             QdrantScheduler._instance = BackgroundScheduler()
-            QdrantScheduler._instance.add_job(upload_to_qdrant, 'interval', minutes = 10, id = 'qdrant_upload_job')
-            QdrantScheduler._instance.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+            QdrantScheduler._instance.add_job(
+                upload_to_qdrant, "interval", minutes=10, id="qdrant_upload_job"
+            )
+            QdrantScheduler._instance.add_listener(
+                job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR
+            )
             QdrantScheduler._instance.start()
             # Shut down the scheduler when exiting the app
-            logger.info('Scheduler initialized')
+            logger.info("Scheduler initialized")
             atexit.register(lambda: QdrantScheduler._instance.shutdown(wait=False))
         return QdrantScheduler._instance
-    
+
     @staticmethod
     def add_listener(listener, mask):
         scheduler = QdrantScheduler.get_instance()

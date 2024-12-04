@@ -11,22 +11,25 @@ from sentence_transformers import SentenceTransformer
 
 from app.models.parsed_document_model import Chunk, Document, TextualContent
 from utils.db_connection import Connection
-from utils.nlp_helpers import E5Tokenizer, SpacySenter
+from utils.nlp_helpers import E5Tokenizer
 from app.config import config
 
 
 # Configure logging
-logger = logging.getLogger('app')
+logger = logging.getLogger("app")
 logger.setLevel(logging.INFO)
 
-def section_chunks_to_points(document_metadata: dict,
-                             section_chunks: List[Chunk],
-                             model,
-                             passage_prompt: str = ''):
+
+def section_chunks_to_points(
+    document_metadata: dict,
+    section_chunks: List[Chunk],
+    model,
+    passage_prompt: str = "",
+):
     """
     Transforms chunks of document sections into point structures suitable for indexing in a Qdrant vector database.
 
-    This function iterates over a list of document section chunks, encodes them into vectors using a provided model, 
+    This function iterates over a list of document section chunks, encodes them into vectors using a provided model,
     and packages these vectors along with metadata into point structures. Each point structure includes a unique identifier,
     vector representation of the chunk text, and additional metadata such as creation and modification dates.
 
@@ -42,7 +45,6 @@ def section_chunks_to_points(document_metadata: dict,
         List[PointStruct]: A list of PointStruct objects, each containing a unique identifier, a vector representation of the text, and the payload of metadata.
     """
 
-
     section_points = list()
     previous_chunk_id = None
 
@@ -55,28 +57,36 @@ def section_chunks_to_points(document_metadata: dict,
             raise TypeError
         payload = document_metadata.copy()
         payload.update(chunk.get_data())
-        payload['date_created'] = datetime.date(datetime.today()).isoformat()
-        payload['date_modified'] = datetime.date(datetime.today()).isoformat()
-        payload['previous_chunk_id'] = previous_chunk_id
+        payload["date_created"] = datetime.date(datetime.today()).isoformat()
+        payload["date_modified"] = datetime.date(datetime.today()).isoformat()
+        payload["previous_chunk_id"] = previous_chunk_id
 
         chunk_id = str(uuid.uuid4())
         previous_chunk_id = chunk_id
 
         section_points.append(
-            PointStruct(id=chunk_id,
-                        vector=list(model.encode(
-                            chunk_text, normalize_embeddings=True, prompt=passage_prompt).astype(float)),
-                        payload=payload)
+            PointStruct(
+                id=chunk_id,
+                vector=list(
+                    model.encode(
+                        chunk_text, normalize_embeddings=True, prompt=passage_prompt
+                    ).astype(float)
+                ),
+                payload=payload,
+            )
         )
     return section_points
 
 
-
-def upload_vector_data(dir, filename: str,
-                       config: dict,
-                       qdrant_client: QdrantClient, pg_connection: Connection, 
-                       embedding_model: SentenceTransformer, 
-                       tokenizer, senter) -> None:
+def upload_vector_data(
+    dir,
+    filename: str,
+    config: dict,
+    qdrant_client: QdrantClient,
+    pg_connection: Connection,
+    embedding_model: SentenceTransformer,
+    tokenizer,
+) -> None:
     """
     Uploads vector data to the Qdrant vector database and updates the document status to 'uploaded' in the PostgreSQL database.
 
@@ -88,124 +98,137 @@ def upload_vector_data(dir, filename: str,
         pg_connection (Connection): Connection instance used to interact with the PostgreSQL database.
         embedding_model (SentenceTransformer): A pre-trained sentence transformer model for encoding text into vectors.
         tokenizer (E5Tokenizer): An instance of the E5Tokenizer used for tokenizing text.
-        senter (SpacySenter): An instance of the SpacySenter used for sentence segmentation.
     """
 
-    logger.info(f'Loading from config: {config}')
-    collection_name = os.getenv('QDRANT_COLLECTION') # config['dbs']['qdrant']['collection_name']
-    max_tokens = config['embeddings']['max_tokens']
-    passage_prompt = config['embeddings']['passage_prompt']
-    sentence_block_size = config['document_chunking']['sentence_block_size']
+    logger.info(f"Loading from config: {config}")
+    collection_name = os.getenv("QDRANT_COLLECTION")
+    max_tokens = config["embeddings"]["max_tokens"]
+    passage_prompt = config["embeddings"]["passage_prompt"]
 
     # Loading json data
-    logger.info(f'Loading json: {os.path.join(dir, filename)}')
-    with open(os.path.join(dir, filename), 'r', encoding='utf-8') as fin:
+    logger.info(f"Loading json: {os.path.join(dir, filename)}")
+    with open(os.path.join(dir, filename), "r", encoding="utf-8") as fin:
         document_json = json.loads(fin.read())
 
-    logger.info(f'Loaded collection {collection_name}')
-    document = Document(json_filename=filename,
-                filename=document_json['filename'],
-                publication=document_json['publication'],
-                publication_year=document_json['publication_year'],
-                title=document_json['title'],
-                author=document_json['author'],
-                languages=document_json['languages'],
-                field_keywords=document_json['field_keywords'],
-                is_valid=document_json['is_valid'],
-                content=TextualContent(document_json['content']))
+    logger.info(f"Loaded collection {collection_name}")
+    document = Document(
+        json_filename=filename,
+        filename=document_json["filename"],
+        publication=document_json["publication"],
+        publication_year=document_json["publication_year"],
+        title=document_json["title"],
+        author=document_json["author"],
+        languages=document_json["languages"],
+        field_keywords=document_json["field_keywords"],
+        is_valid=document_json["is_valid"],
+        content=TextualContent(document_json["content"]),
+    )
 
     document_metadata = document.get_metadata()
-    document_metadata['prompt'] = passage_prompt
+    document_metadata["prompt"] = passage_prompt
 
     # parse content chunks one by one
-    logger.info(f'Chunking document data.')
-    content_chunks = document.content.to_chunks(sentensizer=senter, tokenizer=tokenizer,
-                                                            max_tokens=max_tokens,
-                                                            n_sentences_in_block=sentence_block_size)
+    logger.info(f"Chunking document data.")
+    content_chunks = document.content.to_chunks(
+        tokenizer=tokenizer, max_tokens=max_tokens
+    )
 
     # Chunks to PointStruct
-    logger.info(f'{len(content_chunks)} chunks generated, Creating embeddings.')
-    section_points = section_chunks_to_points(document_metadata, content_chunks, 
-                                                model=embedding_model, passage_prompt=passage_prompt)
+    logger.info(f"{len(content_chunks)} chunks generated, Creating embeddings.")
+    section_points = section_chunks_to_points(
+        document_metadata,
+        content_chunks,
+        model=embedding_model,
+        passage_prompt=passage_prompt,
+    )
 
-    logger.info(f'Embeddings created, starting upload to {collection_name}.')
+    logger.info(f"Embeddings created, starting upload to {collection_name}.")
     step = 20
-    logger.info(f'{len(section_points)} chunks generated for section.')
+    logger.info(f"{len(section_points)} chunks generated for section.")
 
     for i in range(0, len(section_points), step):
         x = i
         qdrant_client.upsert(
             collection_name=collection_name,
             wait=False,
-            points=section_points[x:x+step])
-        
-    logger.info(f'{len(section_points)} chunks added to database')
+            points=section_points[x : x + step],
+        )
+
+    logger.info(f"{len(section_points)} chunks added to database")
 
     try:
-        logger.info('Starting PG status update.')
+        logger.info("Starting PG status update.")
         pg_connection.execute_sql(
             """UPDATE documents
             SET current_state = 'uploaded'
             WHERE pdf_filename = :fname;""",
-            [{'fname': document.filename}]
+            [{"fname": document.filename}],
         )
         pg_connection.commit()
-        logger.info('Finished PG status update.')
+        logger.info("Finished PG status update.")
     except Exception as e:
         logger.error(e)
 
 
 def upload_to_qdrant() -> None:
-    logging.info('Starting upload to qdrant')
+    logging.info("Starting upload to qdrant")
 
-    intermediate_storage_path = config['intermediate_storage']['json_storage_path']
-    finished_storage_path = config['intermediate_storage']['finished_json_storage_path']
+    intermediate_storage_path = config["intermediate_storage"]["json_storage_path"]
+    finished_storage_path = config["intermediate_storage"]["finished_json_storage_path"]
 
     filenames = os.listdir(intermediate_storage_path)
     if len(filenames) == 0:
         return None
 
-    logging.info('Accessing configuration values')
-    client_host = os.getenv('QDRANT_HOST')
-    client_port = os.getenv('QDRANT_PORT')
+    logging.info("Accessing configuration values")
+    client_host = os.getenv("QDRANT_HOST")
+    client_port = os.getenv("QDRANT_PORT")
 
-    embedding_model = config['embeddings']['embedding_model']
+    embedding_model = config["embeddings"]["embedding_model"]
 
-    pg_host = os.getenv('PG_HOST')
-    pg_port = os.getenv('PG_PORT')
-    pg_user = os.getenv('PG_USER')
-    pg_password = os.getenv('PG_PASSWORD')
-    pg_collection_name = os.getenv('PG_COLLECTION')
+    pg_host = os.getenv("PG_HOST")
+    pg_port = os.getenv("PG_PORT")
+    pg_user = os.getenv("PG_USER")
+    pg_password = os.getenv("PG_PASSWORD")
+    pg_collection_name = os.getenv("PG_COLLECTION")
 
-    con = Connection(host=pg_host, port=pg_port, user=pg_user, password=pg_password, db=pg_collection_name)
+    con = Connection(
+        host=pg_host,
+        port=pg_port,
+        user=pg_user,
+        password=pg_password,
+        db=pg_collection_name,
+    )
     con.establish_connection()
 
-    logger.info(f'Established Postgres connection')
+    logger.info(f"Established Postgres connection")
 
     client = QdrantClient(client_host, port=client_port, prefer_grpc=True)
-    logger.info(f'Connected to qdrant: {client_host}:{client_port}')
+    logger.info(f"Connected to qdrant: {client_host}:{client_port}")
 
     model = SentenceTransformer(embedding_model)
-    logger.info(f'Model {embedding_model} loaded.')
+    logger.info(f"Model {embedding_model} loaded.")
 
-    logger.info('Initializing tokenizer and sentence parser.')
+    logger.info("Initializing tokenizer.")
     try:
         tokenizer = E5Tokenizer()
-        senter = SpacySenter(model='en_core_web_sm')
     except Exception as e:
         logger.error(e)
-    logger.info('Tokenizer and parser initialized.')
+    logger.info("Tokenizer and parser initialized.")
 
     for filename in filenames:
-        logger.info(f'Starting {filename} upload.')
-        upload_vector_data(dir=intermediate_storage_path,
-                           config=config,
-                           filename=filename,
-                           qdrant_client=client,
-                           pg_connection=con,
-                           embedding_model=model,
-                           tokenizer=tokenizer,
-                           senter=senter)
-        os.rename(os.path.join(intermediate_storage_path, filename), os.path.join(finished_storage_path, filename))
+        logger.info(f"Starting {filename} upload.")
+        upload_vector_data(
+            dir=intermediate_storage_path,
+            config=config,
+            filename=filename,
+            qdrant_client=client,
+            pg_connection=con,
+            embedding_model=model,
+            tokenizer=tokenizer,
+        )
+        os.rename(
+            os.path.join(intermediate_storage_path, filename),
+            os.path.join(finished_storage_path, filename),
+        )
     con.close()
-    
