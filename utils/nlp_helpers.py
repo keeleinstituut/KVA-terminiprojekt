@@ -1,46 +1,7 @@
-import math
 from typing import List
 
-import spacy
 from transformers import AutoTokenizer
-from utils.upload_helpers import divide_chunks
 
-
-class SpacySenter:
-    def __init__(self, model="en_core_web_trf") -> None:
-        self.model = model
-        if model == "en_core_web_trf":
-            self.nlp = spacy.load("en_core_web_trf", enable=[
-                                'transformer', 'senter'])
-        else:
-            self.nlp = spacy.load("en_core_web_sm", enable=["tok2vec", "parser"])
-
-    def get_sentences(self, text: str = '') -> List[dict]:
-        sentence_data = list()
-
-        # Spacy jaoks liigade pikkade tekstide jaotamine
-        if len(text) >= 1000000:
-            new_block_size = round(len(text) / math.ceil(
-                len(text) / 1000000))  # for more equal chunks
-            text_blocks = divide_chunks(text, new_block_size)
-        else:
-            text_blocks = [text]
-
-        # lausestamine
-        n = 0 
-        #docs = list()
-        for block in self.nlp.pipe(text_blocks):
-            n += 1
-            sents = block.sents
-            for sent in sents:
-                sentence_data.append({
-                    'text': sent.text,
-                    'start_char': sent.start_char,
-                    'end_char': sent.end_char,
-                    'length_token': len(sent)
-                })
-
-        return sentence_data
 
 class E5Tokenizer:
     def __init__(self) -> None:
