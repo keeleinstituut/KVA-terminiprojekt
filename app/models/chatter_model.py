@@ -131,23 +131,27 @@ class Retriever:
 
     async def retrieve_context(self, contents: str, user, instance) -> str:
         """A callback function for handling user input and generating LLM context information based on retrieved documents."""
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.7)
         db_filter = self.filterfactory.assemble_filter()
         logger.info("Filter assembled")
+        try:
+            # Get similar documents
+            results = self.get_similarities(self.prompt + contents, db_filter)
 
-        # Get similar documents
-        results = self.get_similarities(self.prompt + contents, db_filter)
+            # Assemble response string
+            response = ""
+            for result in zip(
+                results["response_text"], results["title"], results["page_no"]
+            ):
+                response += (
+                    f'Title: {result[1]}\nPage: {result[2]}\n\n{result[0]}\n{"*"*15}\n'
+                )
 
-        # Assemble response string
-        response = ""
-        for result in zip(
-            results["response_text"], results["title"], results["page_no"]
-        ):
-            response += (
-                f'Title: {result[1]}\nPage: {result[2]}\n\n{result[0]}\n{"*"*15}\n'
-            )
+            return response
+        except Exception as e:
+            logger.info(e)
+            return 'Response missing'
 
-        return response
 
     def get_similarities(self, text: str, query_filter: Filter) -> dict:
         """
@@ -298,11 +302,16 @@ class LLMChat:
         contents: str,
     ):
         """A callback function for handling user input and generating responses."""
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.7)
         context = await self.retriever.retrieve_context(contents, "", "")
         prompt = self.chat_template.format_messages(
             user_input=contents, retrieval_results=context
         )
         logger.info("Starting LLM query.")
-        response = self.llm.invoke(prompt)
-        return response.content
+        try:
+            response = self.llm.invoke(prompt)
+            return response.content
+        except Exception as e:
+            logger.info(e)
+            return "Ilmnes viga, vabandust. Proovi uuesti."
+
