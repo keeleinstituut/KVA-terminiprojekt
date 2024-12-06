@@ -59,7 +59,7 @@ def create_template(guest_mode=False):
     )
 
     if not guest_mode:
-        tabs.append(("Failide üles laadimine", file_upload_area))
+        tabs.append(("Failide üleslaadimine", file_upload_area))
 
     template = pn.template.VanillaTemplate(
         title="Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas",
