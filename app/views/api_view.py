@@ -88,7 +88,7 @@ class APIViewWidgets(param.Parameterized):
                 'Termin': 0,
                 'Termini märkus': 2,
                 'Termini kasutusnäide': 3,
-                'Keele tasandi märkus': 7
+                'Keeletasandi märkus': 7
             }
         )
 
