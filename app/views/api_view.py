@@ -160,13 +160,19 @@ class APIViewWidgets(param.Parameterized):
             'str': {'type': 'list', 'valuesLookup': True},
         }
 
-        iate_tab = pn.Column(
-            pn.widgets.Tabulator(iate_results, 
-                                groupby=['Link'], 
-                                show_index=False, 
-                                formatters=html_columns, 
-                                layout='fit_columns', 
-                                widths={
+        if iate_results.empty:
+            iate_tab = pn.Column(
+                pn.pane.Markdown("**IATEst ei leitud tulemusi.**"),
+                margin=(20, 0)
+            )
+        else:
+            iate_tab = pn.Column(
+                pn.widgets.Tabulator(iate_results, 
+                                    groupby=['Link'], 
+                                    show_index=False, 
+                                    formatters=html_columns, 
+                                    layout='fit_columns', 
+                                    widths={
                                         'Link': '75', 
                                         'Lisatud': '100', 
                                         'Muudetud': '100', 
@@ -178,11 +184,11 @@ class APIViewWidgets(param.Parameterized):
                                         'Definitsioon': '400',
                                         'Märkus': '200',
                                         'Kontekst': '300'
-                                        },
-                                editors=tabulator_editors, 
-                                header_filters=True),
-            margin=(20, 0)
-        )
+                                    },
+                                    editors=tabulator_editors, 
+                                    header_filters=True),
+                margin=(20, 0)
+            )
 
         combined_df = pd.concat([
             collins_english_results, 
@@ -195,16 +201,28 @@ class APIViewWidgets(param.Parameterized):
             'Keelend': {'type': 'html'},
         }
 
-        dictionaries_tab = pn.Column(
-            pn.widgets.Tabulator(combined_df, 
-                                formatters=dict_html_columns, 
-                                show_index=False, 
-                                editors=tabulator_editors,
-                                layout='fit_columns',
-                                widths={'Allikas': '250', 'Keelend': '150', 'Definitsioon': '600', 'Lühike definitsioon': '500', 'Näide': '600'},
-                                header_filters=True),
-            margin=(20, 0)
-        )
+        if combined_df.empty:
+            dictionaries_tab = pn.Column(
+                pn.pane.Markdown("**Sõnaraamatutest ei leitud tulemusi.**"),
+                margin=(20, 0)
+            )
+        else:
+            dictionaries_tab = pn.Column(
+                pn.widgets.Tabulator(combined_df, 
+                                    formatters=dict_html_columns, 
+                                    show_index=False, 
+                                    editors=tabulator_editors,
+                                    layout='fit_columns',
+                                    widths={
+                                        'Allikas': '250', 
+                                        'Keelend': '150', 
+                                        'Definitsioon': '600', 
+                                        'Lühike definitsioon': '500', 
+                                        'Näide': '600'
+                                    },
+                                    header_filters=True),
+                margin=(20, 0)
+            )
 
         tabs = pn.Tabs(
             ("IATE", iate_tab),
@@ -212,6 +230,7 @@ class APIViewWidgets(param.Parameterized):
         )
 
         self.response_area.append(tabs)
+
 
 
 def api_view(app):
