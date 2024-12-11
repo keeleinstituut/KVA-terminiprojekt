@@ -73,7 +73,6 @@ def json_to_df_with_definitions_and_usages(query):
             'Allikas': 'Merriam-Webster',
             'Keelend': '<a href="https://www.merriam-webster.com/dictionary/' + headword + '"  target="_blank">' + headword + '</a>',
             'Definitsioon': extract_definitions(result_value.get('def', [])),
-            'Lühike definitsioon': '; '.join(result_value.get('shortdef', [])),
             'Näide': extract_verbal_illustrations(result_value.get('def', []))
         }
         rows.append(row)
