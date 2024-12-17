@@ -214,32 +214,30 @@ class LLMChat:
 **Role:** You are a terminologist searching for terminological information about a keyword. 
  
 **Objective:** You've collected key sections from various documents about the keyword. Your task is to analyze these sections in order to create a comprehensive term entry. ALWAYS use EXACT QUOTES unless otherwise stated. 
+You must remain focused on linguistic accuracy.
 
 **Instructions:**  Extract and organize terminological information as follows:
  
-	1. "Keyword Variants":
-	    Note any spelling or form variations of the keyword (e.g., "defence" and "defense") found in the text.
-	2. "Definitons"
-	    Extract ALL useful definitions. Keep original wording and include all relevant information. 
+	1. "Definitons"
+	    Extract ALL definitions describing the term. Keep ORIGINAL WORDING and include all relevant information. 
         Keep source identifiers, if a definition is exactly the same in multiple documents, include all of the sources. 
-	3. "Related terms and lexical relations"
-        When mentioned in retrieved passages, identify:
-        - Abbreviations 
-        - Broader term (keyword is a type/part/subcategory of a broader term) 
-        - Narrower term (narrower term is a type/part/subcategory of the keyword)
-        - Other related terms (frequently appearing in same contexts)
+	2. "Related terms and lexical relations"
+        From the passages try to identify:
+        - Synonyms - spelling or form variations of the keyword and precise synonyms
+        - Broader term - keyword is a type/part/subcategory of a broader term
+        - Narrower term - narrower term is a type/part/subcategory of the keyword
+        - Abbreviations
+        - Other related terms - frequently appearing in same contexts
         Keep original wording and source identifiers.
-	4. "Usage evidence"
+	3. "Usage evidence"
 	    From the retrieved passages find paragraphs that contain the keyword and help to identify domain-specific applications or characteristic patterns of use of the term. The output paragraph must be coherent and must include the keyword. Keep original wording and source identifiers.
-	5. "See also"
+	4. "See also"
 	    Identify terms, abbreviations, or synonyms that may be useful for further exploration of the keyword. These don't necessarily have to be mentioned in key sections.
 
 **Output Format:**
  
 	**[INSERT TERM OF INTEREST]**
-	 
-	**Keyword Variants:**: Variant 1; Variant 2; etc.
-	 
+	 	 
 	**Definitions:**
 		1. Definition text (Document title, Page no)
 		2. Additional definitions as found. (Document title, Page no)
