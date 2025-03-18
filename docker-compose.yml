@@ -26,7 +26,7 @@ services:
       - /local/qdrant_storage/path:/qdrant/storage
 
   terms:
-    image: ghcr.io/eisandra/kva-terminiprojekt:latest
+    image: ghcr.io/keeleinstituut/kva-terminiprojekt:250318
     restart: always
     env_file: "./.env"
     ports:
