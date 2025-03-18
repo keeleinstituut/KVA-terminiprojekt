@@ -2,7 +2,7 @@
 
 ### Kogu rakenduse üles seadmine *docker-compose*'iga
 
-Täida .env fail.
+Täida **.env** fail.
 Muuta vajadusel konfiguratsiooni **/config/config.json**
 
 Konfigureerida **docker-compose.yml** failis: 
@@ -42,3 +42,13 @@ Muuta vajadusel konfiguratsiooni **/config/config.json**
 docker build --progress=plain -t kva-ui .
 docker run --env-file .env --name kva-ui -v {credentials_fail/credentials.json}:/app/config/credentials.json -p 5006:5006 -it kva-ui
 ~~~
+
+
+### Mudelid
+
+Rakendust saab kasutada OpenAI ja Anthropicu Claude'i mudelitega. Mudeli vahetamiseks vahetada mudeli nimi failis **config.json**:
+    ```
+ "llm": {
+        "model": "gpt-4o"
+    },
+    ```
