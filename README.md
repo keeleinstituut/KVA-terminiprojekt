@@ -3,7 +3,6 @@
 ### Kogu rakenduse üles seadmine *docker-compose*'iga
 
 Täida **.env** fail.
-Muuta vajadusel konfiguratsiooni **/config/config.json**
 
 Konfigureerida **docker-compose.yml** failis: 
 * Postgre andmete asukoht: `{pg_andmestike_failitee}:/var/lib/postgresql/data`
@@ -15,6 +14,13 @@ Konfigureerida **docker-compose.yml** failis:
 
 ~~~
 docker compose up
+~~~
+
+#### Kui on vaja muuta konfiguratsiooni:
+Muuta vajadusel konfiguratsiooni **/config/config.json** -- viimasel juhul tuleb teha ka kva-terminiprojekti image build, nt docker compose failis   
+~~~
+ terms:
+    build: ./
 ~~~
 
 
