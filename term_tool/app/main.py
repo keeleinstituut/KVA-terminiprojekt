@@ -49,23 +49,48 @@ def create_chat_view_area():
 
 # Create the template and structure for the UI
 def create_template(guest_mode=False):
-    file_upload_area = create_file_upload_area()
-    api_view_area = create_api_view_area()
-    chat_view_area = create_chat_view_area()
+    try:
+        file_upload_area = create_file_upload_area()
+        logger.info("File upload area created successfully")
+    except Exception as e:
+        logger.error(f"Error creating file upload area: {e}")
+        file_upload_area = pn.Column(
+            pn.pane.Markdown("**File upload is currently unavailable.**")
+        )
+    
+    try:
+        api_view_area = create_api_view_area()
+        logger.info("API view area created successfully")
+    except Exception as e:
+        logger.error(f"Error creating API view area: {e}")
+        api_view_area = pn.Column(
+            pn.pane.Markdown("**API view is currently unavailable.**")
+        )
+    try:
+        chat_view_area = create_chat_view_area()
+        logger.info("Chat view area created successfully")
+    except Exception as e:
+        logger.error(f"Error creating chat view area: {e}")
+        chat_view_area = pn.Column(
+            pn.pane.Markdown("**Chat view is currently unavailable.**")
+        )
 
     tabs = pn.Tabs(
-        ("API päringud", api_view_area),
-        ("Dokumendiotsing", chat_view_area),
+       ("API päringud", api_view_area),
+       ("Dokumendiotsing", chat_view_area),
     )
 
     if not guest_mode:
+      #  pass
         tabs.append(("Failide üleslaadimine", file_upload_area))
-
+    
     template = pn.template.VanillaTemplate(
         title="Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas",
         main=[tabs],
         sidebar_width=300,
     )
+    
+    logger.info("Template created successfully")
 
     return template
 

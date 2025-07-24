@@ -54,6 +54,7 @@ class FilterActionHandler(param.Parameterized):
         self.filterfactory = filterfactory
 
         self.con = Connection(**CONNECTION_PARAMS)
+        logger.info(CONNECTION_PARAMS)
         self.con.establish_connection()
 
         self.apply_filters_button = pn.widgets.Button(
@@ -100,6 +101,7 @@ class FilterActionHandler(param.Parameterized):
             keywords_df = self.con.statement_to_df(
                 """ SELECT DISTINCT keyword FROM keywords ORDER BY keyword"""
             )
+            logger.info(keywords_df)
             return keywords_df
         except Exception as e:
             logger.error(e)
@@ -111,6 +113,7 @@ class FilterActionHandler(param.Parameterized):
             files_df = self.con.statement_to_df(
                 """ SELECT id, title FROM documents WHERE current_state = 'uploaded' ORDER BY title"""
             )
+            logger.info(files_df)
             return files_df
         except Exception as e:
             logger.error(e)
@@ -243,7 +246,7 @@ def llm_view():
         show_rerun=False,
         show_undo=False,
         show_copy_icon=False,
-        sizing_mode="stretch_width",
+        sizing_mode="stretch_both",
         reaction_icons={},
     )
 

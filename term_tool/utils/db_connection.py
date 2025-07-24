@@ -3,6 +3,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import ResourceClosedError
 import pandas as pd
 from sqlalchemy.pool import NullPool
+import logging
+
+
+logger = logging.getLogger("app")
+logger.setLevel(logging.INFO)
+
 
 class Connection():
     def __init__(self, host: str, port: int, user: str, password: str, db: str):
@@ -16,8 +22,18 @@ class Connection():
 
 
     def establish_connection(self):
-        self.session = self.Session()
-        return self.engine
+        try:
+            self.session = self.Session()
+                    # Test connection
+           
+            connection = self.engine.connect()
+            connection.close()
+        
+            print("Database connection established successfully")
+            return self.engine
+        except Exception as e:
+            print(f"Failed to establish database connection: {e}")
+            raise
 
     def table_to_dataframe(self, table_name: str) -> pd.DataFrame:
         """
@@ -55,6 +71,7 @@ class Connection():
     def statement_to_df(self, statement: str):
         try:
             result = self.execute_sql(statement, [])
+            logger.info(result)
             df = pd.DataFrame(result['data'])
             df.columns = result['keys']
             return df 
