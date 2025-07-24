@@ -27,6 +27,7 @@ services:
 
   terms:
     image: ghcr.io/keeleinstituut/kva-terminiprojekt:250318
+    container_name: panel_riigikaitse
     restart: always
     env_file: "./.env"
     ports:
@@ -35,6 +36,29 @@ services:
       - 5006
     volumes:
       - local/authentication_credentials/file.json:/app/config/credentials.json
+    command: ["--cookie-secret", "my_super_safe_cookie_secret_2", "--basic-auth", "../config/credentials.json", "--port", "5006","--allow-websocket-origin", "*"]
+
+  terms_2:
+    image: ghcr.io/keeleinstituut/kva-terminiprojekt:250318
+    container_name: panel_siseturvalisus
+    restart: always
+    env_file: "./.env.siseturvalisus"
+    ports:
+      - "5007:5007"
+    expose:
+      - 5007
+    volumes:
+      - local/authentication_credentials/file.json:/app/config/credentials.json
+    command: ["--cookie-secret", "my_super_safe_cookie_secret_2", "--basic-auth", "../config/credentials.json", "--port", "5007", "--allow-websocket-origin", "*"]
+    
+
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    restart: always
+    ports:
+      - "80:80"
 
 volumes:
   database_data:
