@@ -203,7 +203,6 @@ class APIViewWidgets(param.Parameterized):
 
         if combined_df.empty:
             dictionaries_tab = pn.Column(
-                combined_df[['Allikas', 'Keelend', 'Definitsioon', 'Näide']],
                 pn.pane.Markdown("**Sõnaraamatutest ei leitud tulemusi.**"),
                 margin=(20, 0)
             )
