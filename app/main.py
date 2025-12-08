@@ -1,37 +1,11 @@
-import os
-import sys
-
+"""
+Main Panel application - session handling only.
+Heavy initialization is done once in init_app.py
+"""
 import panel as pn
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-import logging.config
-import os
-
-from dotenv import load_dotenv
-
-from app.models.qdrant_upload_scheduler import QdrantScheduler
-from app.views.api_view import api_view
-from app.views.file_upload import file_upload
-from app.views.llm_view import llm_view
-from utils import iate_api_helpers
-
-# Disable parallelism for tokenizers
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-load_dotenv(".env")
-
-# Initialize logging configuration
-logging.config.fileConfig(
-    os.getenv("LOGGER_CONFIG"), defaults={"filename": os.getenv("LOG_FILE")}
-)
-logger = logging.getLogger("app")
-
-# Initialize scheduler for uploading data to qdrant
-scheduler = QdrantScheduler.get_instance()
-
-# Initialize domains (assuming this is necessary for API operations)
-domains = iate_api_helpers.initialize_domains()
+# Import from cached init module (runs only ONCE)
+from init_app import logger, file_upload, llm_view, prompt_view, document_management
 
 
 # Define the layout areas for the Panel UI
@@ -39,27 +13,35 @@ def create_file_upload_area():
     return pn.Column(file_upload())
 
 
-def create_api_view_area():
-    return pn.Column(api_view(domains))
-
-
 def create_chat_view_area():
     return pn.Column(llm_view())
 
 
+def create_prompt_view_area():
+    return pn.Column(prompt_view())
+
+
+def create_document_management_area():
+    return pn.Column(document_management())
+
+
 # Create the template and structure for the UI
 def create_template(guest_mode=False):
-    file_upload_area = create_file_upload_area()
-    api_view_area = create_api_view_area()
     chat_view_area = create_chat_view_area()
 
     tabs = pn.Tabs(
-        ("API päringud", api_view_area),
         ("Dokumendiotsing", chat_view_area),
     )
 
     if not guest_mode:
+        # Only create these views for non-guest users
+        document_management_area = create_document_management_area()
+        file_upload_area = create_file_upload_area()
+        prompt_view_area = create_prompt_view_area()
+        
+        tabs.append(("Dokumentide haldamine", document_management_area))
         tabs.append(("Failide üleslaadimine", file_upload_area))
+        tabs.append(("Promptide haldamine", prompt_view_area))
 
     template = pn.template.VanillaTemplate(
         title="Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas",
@@ -72,13 +54,12 @@ def create_template(guest_mode=False):
 
 # Main function to create and serve the Panel app
 def create_app(guest_mode: bool = False):
-    template = create_template(guest_mode=guest_mode)
-    return template
+    return create_template(guest_mode=guest_mode)
 
 
+# Session handling
 username = pn.state.user
-
-logger.info(pn.state.user_info)
+logger.info(f"New session: user={username}")
 
 if username == "kylaline":
     template = create_app(guest_mode=True).servable()

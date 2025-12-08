@@ -3,10 +3,10 @@ import logging
 import os
 import uuid
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import PointStruct
+from qdrant_client.http.models import PointStruct, SparseVector
 from sentence_transformers import SentenceTransformer
 
 from app.models.parsed_document_model import Chunk, Document, TextualContent
@@ -20,11 +20,30 @@ logger = logging.getLogger("app")
 logger.setLevel(logging.INFO)
 
 
+def encode_sparse(text: str, sparse_model) -> dict:
+    """
+    Encodes text into a sparse vector using the BM25/SPLADE model.
+    
+    Args:
+        text (str): The text to encode.
+        sparse_model: The sparse embedding model.
+        
+    Returns:
+        dict: A dictionary with 'indices' and 'values' for sparse vector.
+    """
+    embeddings = list(sparse_model.embed([text]))[0]
+    return {
+        "indices": embeddings.indices.tolist(),
+        "values": embeddings.values.tolist()
+    }
+
+
 def section_chunks_to_points(
     document_metadata: dict,
     section_chunks: List[Chunk],
     model,
     passage_prompt: str = "",
+    sparse_model=None,
 ):
     """
     Transforms chunks of document sections into point structures suitable for indexing in a Qdrant vector database.
@@ -40,9 +59,10 @@ def section_chunks_to_points(
         - section_chunks (List[Chunk]): A list of Chunk objects representing segments of the document.
         - model: A model object capable of encoding text into vector representations.
         - passage_prompt (dict, optional): Additional parameters or prompts to be passed to the model during the encoding process. Defaults to an empty dictionary.
+        - sparse_model: Optional sparse embedding model for hybrid search support.
 
     Returns:
-        List[PointStruct]: A list of PointStruct objects, each containing a unique identifier, a vector representation of the text, and the payload of metadata.
+        List[PointStruct]: A list of PointStruct objects, each containing a unique identifier, vector representations (dense and optionally sparse), and the payload of metadata.
     """
 
     section_points = list()
@@ -64,14 +84,31 @@ def section_chunks_to_points(
         chunk_id = str(uuid.uuid4())
         previous_chunk_id = chunk_id
 
+        # Create dense vector
+        dense_vector = list(
+            model.encode(
+                chunk_text, normalize_embeddings=True, prompt=passage_prompt
+            ).astype(float)
+        )
+
+        # Create vector dict for named vectors (hybrid search support)
+        if sparse_model is not None:
+            sparse_vec = encode_sparse(chunk_text, sparse_model)
+            vector = {
+                "dense": dense_vector,
+                "sparse": SparseVector(
+                    indices=sparse_vec["indices"],
+                    values=sparse_vec["values"]
+                )
+            }
+        else:
+            # Fallback to single vector for backward compatibility
+            vector = dense_vector
+
         section_points.append(
             PointStruct(
                 id=chunk_id,
-                vector=list(
-                    model.encode(
-                        chunk_text, normalize_embeddings=True, prompt=passage_prompt
-                    ).astype(float)
-                ),
+                vector=vector,
                 payload=payload,
             )
         )
@@ -86,6 +123,7 @@ def upload_vector_data(
     pg_connection: Connection,
     embedding_model: SentenceTransformer,
     tokenizer,
+    sparse_model=None,
 ) -> None:
     """
     Uploads vector data to the Qdrant vector database and updates the document status to 'uploaded' in the PostgreSQL database.
@@ -98,6 +136,7 @@ def upload_vector_data(
         pg_connection (Connection): Connection instance used to interact with the PostgreSQL database.
         embedding_model (SentenceTransformer): A pre-trained sentence transformer model for encoding text into vectors.
         tokenizer (E5Tokenizer): An instance of the E5Tokenizer used for tokenizing text.
+        sparse_model: Optional sparse embedding model for hybrid search support.
     """
 
     logger.info(f"Loading from config: {config}")
@@ -133,13 +172,14 @@ def upload_vector_data(
         tokenizer=tokenizer, max_tokens=max_tokens
     )
 
-    # Chunks to PointStruct
+    # Chunks to PointStruct (with optional sparse embeddings for hybrid search)
     logger.info(f"{len(content_chunks)} chunks generated, Creating embeddings.")
     section_points = section_chunks_to_points(
         document_metadata,
         content_chunks,
         model=embedding_model,
         passage_prompt=passage_prompt,
+        sparse_model=sparse_model,
     )
 
     logger.info(f"Embeddings created, starting upload to {collection_name}.")
@@ -185,6 +225,9 @@ def upload_to_qdrant() -> None:
     client_port = os.getenv("QDRANT_PORT")
 
     embedding_model = config["embeddings"]["embedding_model"]
+    
+    # Get hybrid search configuration
+    hybrid_config = config.get("hybrid_search", {"enabled": False})
 
     pg_host = os.getenv("PG_HOST")
     pg_port = os.getenv("PG_PORT")
@@ -209,6 +252,18 @@ def upload_to_qdrant() -> None:
     model = SentenceTransformer(embedding_model)
     logger.info(f"Model {embedding_model} loaded.")
 
+    # Initialize sparse model for hybrid search if enabled
+    sparse_model = None
+    if hybrid_config.get("enabled", False):
+        try:
+            from fastembed import SparseTextEmbedding
+            sparse_model_name = hybrid_config.get("sparse_model", "Qdrant/bm25")
+            sparse_model = SparseTextEmbedding(model_name=sparse_model_name)
+            logger.info(f"Sparse model {sparse_model_name} loaded for hybrid search.")
+        except Exception as e:
+            logger.warning(f"Failed to load sparse model, falling back to dense-only: {e}")
+            sparse_model = None
+
     logger.info("Initializing tokenizer.")
     try:
         tokenizer = E5Tokenizer()
@@ -226,6 +281,7 @@ def upload_to_qdrant() -> None:
             pg_connection=con,
             embedding_model=model,
             tokenizer=tokenizer,
+            sparse_model=sparse_model,
         )
         os.rename(
             os.path.join(intermediate_storage_path, filename),
