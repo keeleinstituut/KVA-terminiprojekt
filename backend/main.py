@@ -242,6 +242,7 @@ async def chat(
                 expand_query=request.expand_query,
                 expand_context=request.expand_context,
                 use_reranking=request.use_reranking,
+                output_categories=request.output_categories,
             )
         else:
             result = service.chat(
@@ -253,6 +254,7 @@ async def chat(
                 debug=request.debug,
                 expand_context=request.expand_context,
                 use_reranking=request.use_reranking,
+                output_categories=request.output_categories,
             )
         
         # Convert term_entry dict to Pydantic model if present

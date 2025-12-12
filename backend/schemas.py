@@ -106,6 +106,10 @@ class ChatRequest(BaseModel):
     expand_query: bool = Field(default=False, description="Expand query with LLM-generated synonyms/related terms before searching")
     expand_context: bool = Field(default=False, description="Expand retrieved chunks with adjacent paragraphs for fuller context")
     use_reranking: bool = Field(default=True, description="Use cross-encoder reranking to improve search result relevance")
+    output_categories: List[str] = Field(
+        default=["definitions", "related_terms", "usage_evidence"],
+        description="Categories to include in output: definitions, related_terms, usage_evidence"
+    )
 
 
 class PipelineStepDebug(BaseModel):

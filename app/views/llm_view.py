@@ -114,6 +114,7 @@ class BackendClient:
         expand_query: bool = False,
         expand_context: bool = False,
         use_reranking: bool = True,
+        output_categories: list = None,
     ) -> dict:
         """Call the chat endpoint."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -131,6 +132,7 @@ class BackendClient:
                     "expand_query": expand_query,
                     "expand_context": expand_context,
                     "use_reranking": use_reranking,
+                    "output_categories": output_categories or ["definitions", "related_terms", "usage_evidence"],
                 }
             )
             response.raise_for_status()
@@ -223,8 +225,9 @@ class FilterState:
         self.expand_query: bool = True   # Enabled by default
         self.expand_context: bool = True  # Enabled by default
         self.use_reranking: bool = True  # Enabled by default
+        self.output_categories: list = ["definitions", "related_terms", "usage_evidence"]  # All enabled by default
     
-    def apply(self, files: list, limit: int, only_valid: bool, prompt_set_id: int = None, debug_mode: bool = False, parallel_mode: bool = False, expand_query: bool = False, expand_context: bool = False, use_reranking: bool = True):
+    def apply(self, files: list, limit: int, only_valid: bool, prompt_set_id: int = None, debug_mode: bool = False, parallel_mode: bool = False, expand_query: bool = False, expand_context: bool = False, use_reranking: bool = True, output_categories: list = None):
         self.files = files
         self.limit = limit
         self.only_valid = only_valid
@@ -234,6 +237,7 @@ class FilterState:
         self.expand_query = expand_query
         self.expand_context = expand_context
         self.use_reranking = use_reranking
+        self.output_categories = output_categories or ["definitions", "related_terms", "usage_evidence"]
 
 
 class FilterActionHandler(param.Parameterized):
@@ -317,6 +321,17 @@ class FilterActionHandler(param.Parameterized):
             name="🎯 Reranking (järjesta tulemused cross-encoder mudeliga täpsemaks)", 
             width=500,
             value=True,  # Enabled by default
+        )
+        
+        self.output_categories_selector = pn.widgets.CheckBoxGroup(
+            name="Väljundi kategooriad",
+            value=["definitions", "related_terms", "usage_evidence"],  # All selected by default
+            options={
+                "📖 Definitsioonid": "definitions",
+                "🔗 Seotud terminid": "related_terms",
+                "📝 Kasutuskontekstid": "usage_evidence",
+            },
+            inline=False,
         )
 
         super().__init__(**params)
@@ -413,6 +428,7 @@ class FilterActionHandler(param.Parameterized):
             expand_query=self.expand_query_checkbox.value,
             expand_context=self.expand_context_checkbox.value,
             use_reranking=self.reranking_checkbox.value,
+            output_categories=self.output_categories_selector.value,
         )
         logger.info(f"Filters applied: {self.filter_state.__dict__}")
 
@@ -499,7 +515,7 @@ def llm_view():
                 mode += "+context"
             if filter_state.use_reranking:
                 mode += "+reranking"
-            logger.info(f"Sending query to backend: {contents} (mode: {mode}, prompt_set: {filter_state.prompt_set_id}, debug: {filter_state.debug_mode})")
+            logger.info(f"Sending query to backend: {contents} (mode: {mode}, prompt_set: {filter_state.prompt_set_id}, debug: {filter_state.debug_mode}, categories: {filter_state.output_categories})")
             result = await backend_client.chat(
                 query=contents,
                 limit=filter_state.limit,
@@ -510,6 +526,7 @@ def llm_view():
                 expand_query=filter_state.expand_query,
                 expand_context=filter_state.expand_context,
                 use_reranking=filter_state.use_reranking,
+                output_categories=filter_state.output_categories,
             )
             
             response = result["response"]
@@ -568,7 +585,7 @@ def llm_view():
 
     # UI Components
     toggle = pn.widgets.ToggleIcon(
-        icon="adjustments", active_icon="adjustments-off", size="4em", align="end"
+        icon="adjustments", active_icon="adjustments-off", size="4em", align="end", value=True
     )
 
     @param.depends(toggle.param.value, watch=True)
@@ -627,6 +644,9 @@ def llm_view():
         filter_handler.limit_slider,
         filter_handler.validity_checkbox,
         pn.pane.HTML("<hr style='margin: 10px 0;'>"),
+        pn.pane.HTML("<label><b>Päringu kategooriad</b></label>"),
+        filter_handler.output_categories_selector,
+        pn.pane.HTML("<hr style='margin: 10px 0;'>"),
         pn.pane.HTML("<label><b>Arendaja valikud</b></label>"),
         filter_handler.parallel_checkbox,
         filter_handler.expand_query_checkbox,
@@ -637,7 +657,7 @@ def llm_view():
             filter_handler.apply_filters_button,
             filter_handler.refresh_choices_button,
         ),
-        visible=False,
+        visible=True,
     )
 
     layout = pn.Row(ci, pn.Column(toggle, filter_column))

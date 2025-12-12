@@ -216,6 +216,7 @@ class SearchService:
         only_valid: bool = False,
         ensure_diversity: bool = True,
         use_reranking: bool = True,
+        debug: bool = False,
     ) -> List[Dict[str, Any]]:
         """
         Perform search (hybrid if enabled, otherwise dense-only).
@@ -228,12 +229,15 @@ class SearchService:
             only_valid: Only search valid documents
             ensure_diversity: If True, ensures results from different documents
             use_reranking: If True and reranking is enabled, rerank results
+            debug: If True, returns tuple of (results, debug_info) instead of just results
             
         Returns:
-            List of search results with text, title, page, score
+            List of search results, or tuple of (results, debug_info) if debug=True
         """
         if not self._initialized:
             raise RuntimeError("SearchService not initialized")
+        
+        debug_info = {} if debug else None
         
         query_filter = self._build_filter(files=files, only_valid=only_valid)
         query_prompt = self.config["embeddings"]["query_prompt"]
@@ -247,20 +251,56 @@ class SearchService:
             fetch_limit = limit
         
         if self.hybrid_enabled and self.sparse_model is not None:
-            results = self._hybrid_search(query, query_prompt, fetch_limit, query_filter)
+            if debug:
+                results, search_debug = self._hybrid_search_debug(query, query_prompt, fetch_limit, query_filter)
+                debug_info["search_steps"] = search_debug
+            else:
+                results = self._hybrid_search(query, query_prompt, fetch_limit, query_filter)
         else:
             results = self._dense_search(query, query_prompt, fetch_limit, query_filter)
+            if debug:
+                debug_info["search_steps"] = {"type": "dense_only", "results_count": len(results)}
         
         # Apply reranking if enabled (before diversity to get best results first)
         if self.reranking_enabled and use_reranking and len(results) > 0:
+            pre_rerank_results = results.copy() if debug else None
             # Rerank all results, then apply diversity/limit
             results = self._rerank(query, results, top_k=None)
+            if debug:
+                debug_info["reranking"] = {
+                    "enabled": True,
+                    "model": self.config.get("reranking", {}).get("model", "unknown"),
+                    "input_count": len(pre_rerank_results),
+                    "results_before": [
+                        {"rank": i+1, "title": r["title"], "page": r["page_number"], "score": round(r["score"], 4), "text": r["text"]}
+                        for i, r in enumerate(pre_rerank_results)
+                    ],
+                    "results_after": [
+                        {"rank": i+1, "title": r["title"], "page": r["page_number"], "rerank_score": round(r.get("rerank_score", r["score"]), 4), "original_score": round(r.get("original_score", 0), 4), "text": r["text"]}
+                        for i, r in enumerate(results)
+                    ],
+                }
+        elif debug:
+            debug_info["reranking"] = {"enabled": False}
         
         # Apply document diversity if requested
         if ensure_diversity and len(results) > limit:
+            pre_diversity_count = len(results) if debug else None
             results = self._ensure_document_diversity(results, limit)
+            if debug:
+                debug_info["diversity"] = {
+                    "applied": True,
+                    "input_count": pre_diversity_count,
+                    "output_count": len(results),
+                }
+        elif debug:
+            debug_info["diversity"] = {"applied": False}
         
-        return results[:limit]
+        final_results = results[:limit]
+        
+        if debug:
+            return final_results, debug_info
+        return final_results
     
     def _ensure_document_diversity(
         self,
@@ -497,6 +537,125 @@ class SearchService:
         )
         
         return self._format_results(results.points)
+    
+    def _hybrid_search_debug(
+        self,
+        query: str,
+        query_prompt: str,
+        limit: int,
+        query_filter: Optional[Filter],
+    ) -> tuple:
+        """
+        Perform hybrid search with detailed debug information.
+        
+        Returns:
+            Tuple of (results, debug_info) where debug_info contains:
+            - dense_results: Top results from dense search alone
+            - sparse_results: Top results from sparse search alone  
+            - fused_results: Results after RRF fusion
+            - sparse_tokens: The sparse vector tokens/weights
+        """
+        import time
+        logger.info("Performing hybrid search with debug info")
+        debug_info = {"type": "hybrid"}
+        
+        # Step 1: Encode dense vector
+        t0 = time.time()
+        dense_vector = self.dense_model.encode(
+            query_prompt + query,
+            normalize_embeddings=True
+        ).tolist()
+        debug_info["dense_encoding_ms"] = round((time.time() - t0) * 1000, 1)
+        
+        # Step 2: Encode sparse vector
+        t0 = time.time()
+        sparse_vector = self._encode_sparse(query)
+        debug_info["sparse_encoding_ms"] = round((time.time() - t0) * 1000, 1)
+        
+        # Show top sparse tokens (most weighted terms)
+        if sparse_vector.indices and sparse_vector.values:
+            token_weights = list(zip(sparse_vector.indices, sparse_vector.values))
+            token_weights.sort(key=lambda x: x[1], reverse=True)
+            debug_info["sparse_tokens_count"] = len(sparse_vector.indices)
+            debug_info["top_sparse_weights"] = [
+                {"token_id": idx, "weight": round(w, 4)} 
+                for idx, w in token_weights[:10]
+            ]
+        
+        # Step 3: Run dense search separately (fetch same amount as main search)
+        t0 = time.time()
+        dense_results = self.client.query_points(
+            collection_name=self.collection_name,
+            query=dense_vector,
+            using="dense",
+            query_filter=query_filter,
+            limit=limit * 2,  # Fetch more to see full picture
+            timeout=100,
+        )
+        debug_info["dense_search_ms"] = round((time.time() - t0) * 1000, 1)
+        dense_formatted = self._format_results(dense_results.points)
+        debug_info["dense_results"] = [
+            {"rank": i+1, "title": r["title"], "page": r["page_number"], "score": round(r["score"], 4), "text": r["text"]}
+            for i, r in enumerate(dense_formatted)
+        ]
+        debug_info["dense_total_count"] = len(dense_formatted)
+        
+        # Step 4: Run sparse search separately
+        t0 = time.time()
+        sparse_results = self.client.query_points(
+            collection_name=self.collection_name,
+            query=sparse_vector,
+            using="sparse",
+            query_filter=query_filter,
+            limit=limit * 2,  # Fetch more to see full picture
+            timeout=100,
+        )
+        debug_info["sparse_search_ms"] = round((time.time() - t0) * 1000, 1)
+        sparse_formatted = self._format_results(sparse_results.points)
+        debug_info["sparse_results"] = [
+            {"rank": i+1, "title": r["title"], "page": r["page_number"], "score": round(r["score"], 4), "text": r["text"]}
+            for i, r in enumerate(sparse_formatted)
+        ]
+        debug_info["sparse_total_count"] = len(sparse_formatted)
+        
+        # Step 5: Run hybrid fusion
+        t0 = time.time()
+        fused_results = self.client.query_points(
+            collection_name=self.collection_name,
+            prefetch=[
+                Prefetch(
+                    query=dense_vector,
+                    using="dense",
+                    filter=query_filter,
+                    limit=limit * 2,
+                ),
+                Prefetch(
+                    query=sparse_vector,
+                    using="sparse",
+                    filter=query_filter,
+                    limit=limit * 2,
+                ),
+            ],
+            query=FusionQuery(fusion=Fusion.RRF),
+            limit=limit * 2,  # Fetch more to see full picture
+            timeout=100,
+        )
+        debug_info["fusion_ms"] = round((time.time() - t0) * 1000, 1)
+        fused_formatted = self._format_results(fused_results.points)
+        debug_info["fused_results"] = [
+            {"rank": i+1, "title": r["title"], "page": r["page_number"], "score": round(r["score"], 4), "text": r["text"]}
+            for i, r in enumerate(fused_formatted)
+        ]
+        debug_info["fused_total_count"] = len(fused_formatted)
+        
+        # Add summary
+        debug_info["summary"] = {
+            "total_search_ms": debug_info["dense_search_ms"] + debug_info["sparse_search_ms"] + debug_info["fusion_ms"],
+            "dense_unique": len(set(r["title"] + str(r["page_number"]) for r in dense_formatted[:10])),
+            "sparse_unique": len(set(r["title"] + str(r["page_number"]) for r in sparse_formatted[:10])),
+        }
+        
+        return fused_formatted, debug_info
     
     def _format_results(self, results) -> List[Dict[str, Any]]:
         """Format search results into a standard format."""
@@ -977,7 +1136,12 @@ class ChatService:
             "warning_message": warning,
         }
     
-    def _format_term_entry(self, term_entry: Dict[str, Any], show_confidence: bool = True) -> str:
+    def _format_term_entry(
+        self, 
+        term_entry: Dict[str, Any], 
+        show_confidence: bool = True,
+        output_categories: List[str] = None,
+    ) -> str:
         """
         Format structured term entry into human-readable markdown text.
         
@@ -988,10 +1152,17 @@ class ChatService:
         Args:
             term_entry: Parsed term entry dictionary
             show_confidence: Whether to show confidence indicators for low-confidence items
+            output_categories: List of categories to include in output.
+                               Options: "definitions", "related_terms", "usage_evidence"
+                               If None or empty, includes all categories.
             
         Returns:
             Formatted markdown string with clickable source links
         """
+        # Default to all categories if none specified
+        if not output_categories:
+            output_categories = ["definitions", "related_terms", "usage_evidence"]
+        
         lines = []
         
         # Term header
@@ -1005,7 +1176,7 @@ class ChatService:
             lines.append("")
         
         # Definitions
-        if term_entry["definitions"]:
+        if "definitions" in output_categories and term_entry["definitions"]:
             lines.append("**Definitsioonid:**")
             for i, defn in enumerate(term_entry["definitions"], 1):
                 text = defn.get('text', '')
@@ -1021,7 +1192,7 @@ class ChatService:
             lines.append("")
         
         # Related terms
-        if term_entry["related_terms"]:
+        if "related_terms" in output_categories and term_entry["related_terms"]:
             lines.append("**Seotud terminid:**")
             for i, rel in enumerate(term_entry["related_terms"], 1):
                 term = rel.get('term', '')
@@ -1038,7 +1209,7 @@ class ChatService:
             lines.append("")
         
         # Usage evidence
-        if term_entry["usage_evidence"]:
+        if "usage_evidence" in output_categories and term_entry["usage_evidence"]:
             lines.append("**Kasutuskontekstid:**")
             for i, usage in enumerate(term_entry["usage_evidence"], 1):
                 text = usage.get('text', '')
@@ -1074,6 +1245,7 @@ class ChatService:
         debug: bool = False,
         expand_context: bool = False,
         use_reranking: bool = True,
+        output_categories: List[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a chat query: retrieve context and generate response.
@@ -1087,6 +1259,7 @@ class ChatService:
             debug: If True, collect and return debug information for each pipeline step
             expand_context: If True, expand results with adjacent chunks for fuller context
             use_reranking: If True and reranking is enabled, rerank results with cross-encoder
+            output_categories: List of categories to include in output (definitions, related_terms, usage_evidence)
             
         Returns:
             Dict with response text, structured term entry, metadata, and optionally debug info
@@ -1132,13 +1305,25 @@ class ChatService:
         if debug_collector:
             debug_collector.start_step()
         
-        results = self.search_service.search(
-            query=query,
-            limit=limit,
-            files=files,
-            only_valid=only_valid,
-            use_reranking=use_reranking,
-        )
+        # Use debug search if debug mode is enabled
+        search_debug_info = None
+        if debug:
+            results, search_debug_info = self.search_service.search(
+                query=query,
+                limit=limit,
+                files=files,
+                only_valid=only_valid,
+                use_reranking=use_reranking,
+                debug=True,
+            )
+        else:
+            results = self.search_service.search(
+                query=query,
+                limit=limit,
+                files=files,
+                only_valid=only_valid,
+                use_reranking=use_reranking,
+            )
         
         # Step 3b: Context expansion with adjacent chunks
         original_count = len(results)
@@ -1163,16 +1348,23 @@ class ChatService:
             search_type = "hybrid (dense + sparse)" if self.search_service.hybrid_enabled else "dense only"
             if self.search_service.reranking_enabled:
                 search_type += " + reranking"
+            
+            # Include detailed search debug info if available
+            search_step_data = {
+                "search_type": search_type,
+                "reranking_enabled": self.search_service.reranking_enabled,
+                "reranker_model": self.config.get("reranking", {}).get("model", "N/A") if self.search_service.reranking_enabled else "N/A",
+                "collection": self.search_service.collection_name,
+                "results_count": len(results),
+            }
+            if search_debug_info:
+                search_step_data["detailed_steps"] = search_debug_info
+            
             debug_collector.add_step(
                 "Vector Search",
                 f"Performed {search_type} search in Qdrant database",
-                {
-                    "search_type": search_type,
-                    "reranking_enabled": self.search_service.reranking_enabled,
-                    "reranker_model": self.config.get("reranking", {}).get("model", "N/A") if self.search_service.reranking_enabled else "N/A",
-                    "collection": self.search_service.collection_name,
-                    "results_count": len(results),
-                }
+                search_step_data,
+                truncate_at=500000  # Large limit to show all raw results
             )
         
         # Step 4: Search results
@@ -1288,7 +1480,7 @@ class ChatService:
             if debug_collector:
                 debug_collector.start_step()
             
-            formatted_response = self._format_term_entry(term_entry)
+            formatted_response = self._format_term_entry(term_entry, output_categories=output_categories)
             
             if debug_collector:
                 debug_collector.add_step(
@@ -1596,6 +1788,7 @@ class ChatService:
         expand_query: bool = False,
         expand_context: bool = False,
         use_reranking: bool = True,
+        output_categories: List[str] = None,
     ) -> Dict[str, Any]:
         """
         Process a chat query using PARALLEL extraction.
@@ -1617,6 +1810,7 @@ class ChatService:
             expand_query: If True, expand query with LLM before searching
             expand_context: If True, expand results with adjacent chunks for fuller context
             use_reranking: If True and reranking is enabled, rerank results with cross-encoder
+            output_categories: List of categories to include in output (definitions, related_terms, usage_evidence)
             
         Returns:
             Dict with response text, structured term entry, and optionally debug info
@@ -1683,7 +1877,19 @@ class ChatService:
         if debug_collector:
             debug_collector.start_step()
         
+        search_debug_info = None
         if expand_query and expanded_terms:
+            # First, capture debug info for the original query if debug mode
+            if debug:
+                _, search_debug_info = self.search_service.search(
+                    query=query,
+                    limit=limit,
+                    files=files,
+                    only_valid=only_valid,
+                    use_reranking=use_reranking,
+                    debug=True,
+                )
+            
             # Use expanded search with deduplication
             results = self._search_with_expansion(
                 query=query,
@@ -1695,14 +1901,24 @@ class ChatService:
             )
             search_desc = f"Searched with original + {len(expanded_terms)} expanded terms"
         else:
-            # Standard search
-            results = self.search_service.search(
-                query=query,
-                limit=limit,
-                files=files,
-                only_valid=only_valid,
-                use_reranking=use_reranking,
-            )
+            # Standard search (with debug if enabled)
+            if debug:
+                results, search_debug_info = self.search_service.search(
+                    query=query,
+                    limit=limit,
+                    files=files,
+                    only_valid=only_valid,
+                    use_reranking=use_reranking,
+                    debug=True,
+                )
+            else:
+                results = self.search_service.search(
+                    query=query,
+                    limit=limit,
+                    files=files,
+                    only_valid=only_valid,
+                    use_reranking=use_reranking,
+                )
             search_desc = "Standard hybrid search"
         
         if debug_collector:
@@ -1722,10 +1938,21 @@ class ChatService:
                 search_info["from_original_query"] = original_count
                 search_info["from_expanded_query"] = expanded_count
             
+            # Include detailed hybrid search debug info (for original query)
+            if search_debug_info:
+                search_info["detailed_steps"] = search_debug_info
+            
+            # Also include the final combined results with full text
+            search_info["final_results"] = [
+                {"rank": i+1, "title": r.get("title", ""), "page": r.get("page_number", 0), "score": round(r.get("score", 0), 4), "source": r.get("_source", "original"), "text": r.get("text", "")}
+                for i, r in enumerate(results)
+            ]
+            
             debug_collector.add_step(
                 "Vector Search",
                 search_desc,
-                search_info
+                search_info,
+                truncate_at=500000  # Large limit to show all raw results
             )
         
         # Step 4b: Context expansion with adjacent chunks
@@ -1761,62 +1988,48 @@ class ChatService:
                 truncate_at=2000
             )
         
-        # Step 5: Parallel LLM extractions
+        # Step 5: Parallel LLM extractions (only for selected categories)
         if debug_collector:
             debug_collector.start_step()
         
-        # Load prompts from database
-        definitions_prompt = self._get_parallel_prompt("definitions_extraction")
-        related_terms_prompt = self._get_parallel_prompt("related_terms_extraction")
-        usage_evidence_prompt = self._get_parallel_prompt("usage_evidence_extraction")
-        see_also_prompt = self._get_parallel_prompt("see_also_extraction")
+        # Default to all categories if none specified
+        if not output_categories:
+            output_categories = ["definitions", "related_terms", "usage_evidence"]
+        
+        # Load prompts only for selected categories
+        prompts_loaded = {}
+        if "definitions" in output_categories:
+            prompts_loaded["definitions"] = self._get_parallel_prompt("definitions_extraction")
+        if "related_terms" in output_categories:
+            prompts_loaded["related_terms"] = self._get_parallel_prompt("related_terms_extraction")
+        if "usage_evidence" in output_categories:
+            prompts_loaded["usage_evidence"] = self._get_parallel_prompt("usage_evidence_extraction")
+        # Always load see_also (it's a separate feature for navigation)
+        prompts_loaded["see_also"] = self._get_parallel_prompt("see_also_extraction")
         
         if debug_collector:
             debug_collector.add_step(
                 "Prompts Loaded",
-                "Loaded 4 specialized prompts from database",
-                {
-                    "definitions_prompt_length": len(definitions_prompt),
-                    "related_terms_prompt_length": len(related_terms_prompt),
-                    "usage_evidence_prompt_length": len(usage_evidence_prompt),
-                    "see_also_prompt_length": len(see_also_prompt),
-                }
+                f"Loaded {len(prompts_loaded)} specialized prompts (based on selected categories)",
+                {f"{k}_prompt_length": len(v) for k, v in prompts_loaded.items()}
             )
             debug_collector.start_step()
         
         # Create thread pool for parallel LLM calls
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            # Launch all four extractions in parallel
-            tasks = [
-                self._extract_single(
-                    "definitions",
-                    definitions_prompt,
-                    query,
-                    context,
-                    executor
-                ),
-                self._extract_single(
-                    "related_terms",
-                    related_terms_prompt,
-                    query,
-                    context,
-                    executor
-                ),
-                self._extract_single(
-                    "usage_evidence",
-                    usage_evidence_prompt,
-                    query,
-                    context,
-                    executor
-                ),
-                self._extract_single(
-                    "see_also",
-                    see_also_prompt,
-                    query,
-                    context,
-                    executor
-                ),
-            ]
+        num_tasks = len(prompts_loaded)
+        with ThreadPoolExecutor(max_workers=num_tasks) as executor:
+            # Launch only the selected extractions in parallel
+            tasks = []
+            for ext_type, prompt in prompts_loaded.items():
+                tasks.append(
+                    self._extract_single(
+                        ext_type,
+                        prompt,
+                        query,
+                        context,
+                        executor
+                    )
+                )
             
             # Wait for all to complete
             extraction_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -1839,7 +2052,7 @@ class ChatService:
             
             debug_collector.add_step(
                 "Parallel LLM Extractions",
-                "Ran 4 specialized prompts in parallel",
+                f"Ran {len(prompts_loaded)} specialized prompts in parallel",
                 parallel_info,
                 truncate_at=4000
             )
@@ -1893,7 +2106,7 @@ class ChatService:
         if debug_collector:
             debug_collector.start_step()
         
-        formatted_response = self._format_term_entry(term_entry, show_confidence=True)
+        formatted_response = self._format_term_entry(term_entry, show_confidence=True, output_categories=output_categories)
         
         if debug_collector:
             debug_collector.add_step(
