@@ -1374,18 +1374,25 @@ class ChatService:
             debug_collector.start_step()
             results_summary = [
                 {
+                    "rank": i+1,
                     "title": r.get("title", ""),
                     "page": r.get("page_number", 0),
                     "score": round(r.get("score", 0), 4),
-                    "text_preview": r.get("text", "")[:200] + "..." if len(r.get("text", "")) > 200 else r.get("text", ""),
+                    "source": r.get("_source", "original"),
+                    "text_preview": r.get("text", "")[:300] + "..." if len(r.get("text", "")) > 300 else r.get("text", ""),
+                    "text_full": r.get("text", ""),  # Full text for detailed view
+                    "text_length": len(r.get("text", "")),
                 }
-                for r in results
+                for i, r in enumerate(results)
             ]
             debug_collector.add_step(
                 "Search Results",
                 f"Retrieved {len(results)} relevant document chunks",
-                results_summary,
-                truncate_at=4000
+                {
+                    "total_chunks": len(results),
+                    "chunks": results_summary,
+                },
+                truncate_at=500000  # Allow more data for full chunks
             )
         
         # Step 5: Build context
@@ -1471,11 +1478,21 @@ class ChatService:
             term_entry = self._parse_llm_json(response.content, query)
             
             if debug_collector:
+                # Show what was extracted and chunks that were available
+                extraction_summary = {
+                    "chunks_available": len(results),
+                    "extracted": {
+                        "definitions": len(term_entry.get("definitions", [])),
+                        "related_terms": len(term_entry.get("related_terms", [])),
+                        "usage_evidence": len(term_entry.get("usage_evidence", [])),
+                    },
+                    "term_entry": term_entry,
+                }
                 debug_collector.add_step(
                     "JSON Parsed",
                     "Extracted structured term entry from LLM response",
-                    term_entry,
-                    truncate_at=3000
+                    extraction_summary,
+                    truncate_at=5000
                 )
             
             # Step 10: Format response
@@ -1916,6 +1933,7 @@ class ChatService:
         # Step 3: Per-category query expansion and search
         # Each category gets its own expansion and search
         category_contexts = {}  # category -> context string
+        category_results_dict = {}  # category -> list of search results (chunks) for debug
         category_expansions = {}  # category -> expansion info for debug
         expanded_terms = []
         
@@ -1977,28 +1995,47 @@ class ChatService:
                         category_results, max_adjacent_per_result=2
                     )
                 
+                # Store results for debug
+                category_results_dict[category] = category_results
                 category_contexts[category] = self._build_context(category_results)
             
             see_also_context_category = "definitions" if "definitions" in category_contexts else list(category_contexts.keys())[0] if category_contexts else None
             if see_also_context_category:
                 category_contexts["see_also"] = category_contexts[see_also_context_category]
+                category_results_dict["see_also"] = category_results_dict.get(see_also_context_category, [])
             else:
                 category_contexts["see_also"] = ""
+                category_results_dict["see_also"] = []
             
             if debug_collector:
                 expansion_debug_info = {}
                 for category, exp_info in category_expansions.items():
+                    chunks = category_results_dict.get(category, [])
                     expansion_debug_info[category] = {
                         "expanded_terms": exp_info["expanded_terms"],
                         "language": exp_info["language"],
                         "duration_ms": exp_info["duration_ms"],
-                        "context_chunks": len(category_contexts.get(category, "").split("\n\n")) if category in category_contexts else 0,
+                        "chunks_retrieved": len(chunks),
+                        "chunks": [
+                            {
+                                "rank": i+1,
+                                "title": r.get("title", ""),
+                                "page": r.get("page_number", 0),
+                                "score": round(r.get("score", 0), 4),
+                                "source": r.get("_source", "original"),
+                                "text_preview": r.get("text", "")[:300] + "..." if len(r.get("text", "")) > 300 else r.get("text", ""),
+                                "text_full": r.get("text", ""),  # Full text for detailed view
+                                "text_length": len(r.get("text", "")),
+                            }
+                            for i, r in enumerate(chunks)
+                        ],
                     }
                 
                 debug_collector.add_step(
                     "Per-Category Query Expansion & Search",
                     f"Expanded and searched for {len(category_expansions)} categories",
-                    expansion_debug_info
+                    expansion_debug_info,
+                    truncate_at=500000  # Allow more data for full chunks
                 )
         else:
             if debug_collector:
@@ -2122,6 +2159,7 @@ class ChatService:
             # Use same context for all categories (shared search)
             for category in prompts_loaded.keys():
                 category_contexts[category] = shared_context
+                category_results_dict[category] = results  # Store shared results for debug
         
         # Step 4: Parallel LLM extractions (each with its own context)
         if debug_collector:
@@ -2154,12 +2192,32 @@ class ChatService:
                     ext_type, parsed, duration, raw = result
                     # Get items count based on extraction type
                     items = parsed.get(ext_type, parsed.get("definitions", parsed.get("related_terms", parsed.get("usage_evidence", parsed.get("see_also", [])))))
-                    parallel_info.append({
+                    
+                    # Get chunks that were available for this extraction
+                    available_chunks = category_results_dict.get(ext_type, [])
+                    
+                    extraction_info = {
                         "extraction": ext_type,
                         "duration_ms": round(duration, 1),
                         "items_found": len(items) if isinstance(items, list) else 0,
+                        "chunks_available": len(available_chunks),
+                        "extracted_items": items[:10] if isinstance(items, list) and len(items) > 0 else [],  # Show first 10 items
                         "raw_response": raw[:500] + "..." if len(str(raw)) > 500 else raw,
-                    })
+                    }
+                    
+                    # Add chunk summary for this category
+                    if available_chunks:
+                        extraction_info["chunks_summary"] = [
+                            {
+                                "rank": i+1,
+                                "title": r.get("title", ""),
+                                "page": r.get("page_number", 0),
+                                "score": round(r.get("score", 0), 4),
+                            }
+                            for i, r in enumerate(available_chunks)
+                        ]
+                    
+                    parallel_info.append(extraction_info)
                 else:
                     parallel_info.append({"error": str(result)})
             
@@ -2167,7 +2225,7 @@ class ChatService:
                 "Parallel LLM Extractions",
                 f"Ran {len(prompts_loaded)} specialized prompts in parallel",
                 parallel_info,
-                truncate_at=4000
+                truncate_at=20000  # Allow more data for extraction details
             )
         
         # Step 6: Combine results

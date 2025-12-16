@@ -447,47 +447,319 @@ class FilterActionHandler(param.Parameterized):
 
 
 def _format_debug_output(debug_info: dict) -> str:
-    """Format debug information into a readable markdown string."""
+    """Format debug information to show the pipeline flow clearly."""
     if not debug_info:
         return ""
     
+    import json
+    
     extraction_mode = debug_info.get('extraction_mode', 'single')
-    mode_icon = "⚡" if extraction_mode == "parallel" else "📝"
+    total_duration = debug_info.get('total_duration_ms', 0)
+    search_type = debug_info.get('search_type', 'unknown')
+    model_used = debug_info.get('model_used', 'unknown')
+    
+    steps = debug_info.get("pipeline_steps", [])
+    
+    # Parse step data
+    query = ""
+    filters_info = {}
+    expansion_data = {}  # category -> {expanded_terms, chunks, duration}
+    extraction_results = {}  # category -> {items, count, duration}
+    
+    for step in steps:
+        name = step.get("step_name", "")
+        data_str = step.get("data", "")
+        
+        if not data_str:
+            continue
+            
+        try:
+            data = json.loads(data_str)
+        except:
+            continue
+        
+        if "Query Received" in name:
+            query = data.get("query", "")
+        
+        if "Filters Applied" in name:
+            filters_info = data
+        
+        if "Per-Category" in name:
+            for cat, cat_data in data.items():
+                if isinstance(cat_data, dict):
+                    expansion_data[cat] = {
+                        "expanded_terms": cat_data.get("expanded_terms", []),
+                        "chunks": cat_data.get("chunks", []),
+                        "duration_ms": cat_data.get("duration_ms", 0),
+                    }
+        
+        if "Parallel LLM" in name:
+            for ext in data:
+                if isinstance(ext, dict) and "extraction" in ext:
+                    cat = ext.get("extraction")
+                    extraction_results[cat] = {
+                        "items": ext.get("extracted_items", []),
+                        "count": ext.get("items_found", 0),
+                        "duration_ms": ext.get("duration_ms", 0),
+                        "chunks_available": ext.get("chunks_available", 0),
+                    }
     
     lines = []
     lines.append("---")
-    lines.append(f"## 🔍 Debug: Pipeline Steps ({mode_icon} {extraction_mode} mode)")
-    lines.append("")
-    lines.append(f"**Total Duration:** {debug_info.get('total_duration_ms', 0):.1f} ms")
-    lines.append(f"**Extraction Mode:** {extraction_mode}")
-    lines.append(f"**Search Type:** {debug_info.get('search_type', 'unknown')}")
-    lines.append(f"**LLM Model:** {debug_info.get('model_used', 'unknown')}")
-    lines.append(f"**Embedding Model:** {debug_info.get('embedding_model', 'unknown')}")
+    lines.append(f"## 🔍 Pipeline Debug: \"{query}\"")
+    lines.append(f"*Kokku: {total_duration:.0f}ms | {extraction_mode} | {model_used}*")
     lines.append("")
     
-    for step in debug_info.get("pipeline_steps", []):
-        step_num = step.get("step_number", 0)
-        step_name = step.get("step_name", "Unknown")
-        description = step.get("description", "")
-        duration = step.get("duration_ms", 0)
-        data = step.get("data", "")
-        
-        lines.append(f"### Step {step_num}: {step_name}")
-        lines.append(f"*{description}* ({duration:.1f} ms)")
+    # Step 1 & 2: Query and filters
+    lines.append("---")
+    lines.append("### 1️⃣ Päring ja filtrid")
+    lines.append(f"- **Märksõna:** {query}")
+    lines.append(f"- **Lõikude piirang:** {filters_info.get('limit', '?')}")
+    lines.append(f"- **Režiim:** {extraction_mode}")
+    lines.append("")
+    
+    # Step 3: Query expansion and search (per category)
+    if expansion_data:
+        lines.append("---")
+        lines.append("### 2️⃣ Päringu laiendamine ja otsing")
         lines.append("")
         
-        if data:
-            lines.append("<details>")
-            lines.append(f"<summary>Show data</summary>")
+        for cat, cat_info in expansion_data.items():
+            cat_label = {"definitions": "📖 Definitsioonid", "related_terms": "🔗 Seotud terminid",
+                         "usage_evidence": "📝 Kasutusseosed"}.get(cat, cat)
+            
+            expanded = cat_info.get("expanded_terms", [])
+            chunks = cat_info.get("chunks", [])
+            duration = cat_info.get("duration_ms", 0)
+            
+            lines.append(f"#### {cat_label}")
+            lines.append(f"*{duration:.0f}ms*")
             lines.append("")
-            lines.append("```")
-            lines.append(data)
-            lines.append("```")
-            lines.append("</details>")
+            
+            if expanded:
+                lines.append(f"**Laiendatud otsing:** {', '.join(expanded[:5])}{'...' if len(expanded) > 5 else ''}")
+                lines.append("")
+            
+            lines.append(f"**Leitud {len(chunks)} lõiku:**")
+            lines.append("")
+            
+            for i, chunk in enumerate(chunks[:5], 1):
+                title = chunk.get("title", "?")[:40]
+                page = chunk.get("page", "?")
+                score = chunk.get("score", 0)
+                lines.append(f"{i}. *{title}...* (lk {page}, skoor {score:.2f})")
+            
+            if len(chunks) > 5:
+                lines.append(f"   *... +{len(chunks) - 5} veel*")
+            lines.append("")
+            
+            # Expandable full chunks
+            if chunks:
+                lines.append("<details>")
+                lines.append("<summary>Näita lõikude sisu</summary>")
+                lines.append("")
+                for i, chunk in enumerate(chunks, 1):
+                    title = chunk.get("title", "?")
+                    page = chunk.get("page", "?")
+                    text = chunk.get("text_full", chunk.get("text_preview", ""))
+                    lines.append(f"**{i}. {title} (lk {page})**")
+                    lines.append("```")
+                    lines.append(text[:500] + ("..." if len(text) > 500 else ""))
+                    lines.append("```")
+                    lines.append("")
+                lines.append("</details>")
+                lines.append("")
+    
+    # Step 4: LLM extraction results
+    if extraction_results:
+        lines.append("---")
+        lines.append("### 3️⃣ LLM töötlus ja tulemused")
+        lines.append("")
+        
+        for cat, cat_info in extraction_results.items():
+            cat_label = {"definitions": "📖 Definitsioonid", "related_terms": "🔗 Seotud terminid",
+                         "usage_evidence": "📝 Kasutusseosed", "see_also": "👁️ Vaata ka"}.get(cat, cat)
+            
+            items = cat_info.get("items", [])
+            count = cat_info.get("count", 0)
+            duration = cat_info.get("duration_ms", 0)
+            chunks_available = cat_info.get("chunks_available", 0)
+            
+            lines.append(f"#### {cat_label}")
+            lines.append(f"*{chunks_available} lõiku → {count} tulemust ({duration:.0f}ms)*")
+            lines.append("")
+            
+            if items:
+                for i, item in enumerate(items[:5], 1):
+                    if isinstance(item, dict):
+                        text = item.get("text", item.get("term", str(item)))[:150]
+                        source = item.get("source", "")
+                        page = item.get("page", "")
+                        if source:
+                            lines.append(f"{i}. ✅ {text}{'...' if len(str(item.get('text', ''))) > 150 else ''}")
+                            lines.append(f"   *← {source[:40]}{'...' if len(source) > 40 else ''}, lk {page}*")
+                        else:
+                            lines.append(f"{i}. ✅ {text}")
+                    else:
+                        lines.append(f"{i}. ✅ {item}")
+                
+                if len(items) > 5:
+                    lines.append(f"   *... +{len(items) - 5} veel*")
+            else:
+                lines.append("*(midagi ei leitud)*")
+            
             lines.append("")
     
+    # Step 5: Source-result mapping (which chunks produced results)
+    if expansion_data and extraction_results:
+        lines.append("---")
+        lines.append("### 4️⃣ Lõikude kasutamine")
+        lines.append("*Millised lõigud andsid tulemusi?*")
+        lines.append("")
+        
+        # For each category, show which chunks were used
+        for cat in ["definitions", "related_terms", "usage_evidence"]:
+            if cat not in expansion_data or cat not in extraction_results:
+                continue
+            
+            cat_label = {"definitions": "📖 Definitsioonid", "related_terms": "🔗 Seotud terminid",
+                         "usage_evidence": "📝 Kasutusseosed"}.get(cat, cat)
+            
+            chunks = expansion_data[cat].get("chunks", [])
+            items = extraction_results[cat].get("items", [])
+            
+            # Build lookup
+            used_sources = set()
+            for item in items:
+                if isinstance(item, dict):
+                    source = item.get("source", "")
+                    page = item.get("page", "")
+                    used_sources.add(f"{source}|{page}")
+            
+            used_count = 0
+            lines.append(f"**{cat_label}:**")
+            
+            for chunk in chunks[:8]:
+                title = chunk.get("title", "?")
+                page = chunk.get("page", "?")
+                key = f"{title}|{page}"
+                
+                if key in used_sources:
+                    lines.append(f"- ✅ {title[:35]}... (lk {page})")
+                    used_count += 1
+                else:
+                    lines.append(f"- ⬜ {title[:35]}... (lk {page})")
+            
+            if len(chunks) > 8:
+                lines.append(f"  *... +{len(chunks) - 8} veel*")
+            
+            efficiency = f"{(used_count/len(chunks)*100):.0f}%" if chunks else "0%"
+            lines.append(f"  **Kasutatud: {used_count}/{len(chunks)} ({efficiency})**")
+            lines.append("")
+    
+    # Detailed raw data (collapsed)
     lines.append("---")
+    lines.append("<details>")
+    lines.append("<summary>📋 Toorandmed (JSON)</summary>")
+    lines.append("")
+    
+    for step in steps:
+        step_num = step.get("step_number", 0)
+        step_name = step.get("step_name", "Unknown")
+        duration = step.get("duration_ms", 0)
+        data_str = step.get("data", "")
+        
+        lines.append(f"**Step {step_num}: {step_name}** ({duration:.0f}ms)")
+        if data_str:
+            lines.append("<details>")
+            lines.append("<summary>Data</summary>")
+            lines.append("")
+            lines.append("```json")
+            lines.append(data_str[:2000] + ("..." if len(data_str) > 2000 else ""))
+            lines.append("```")
+            lines.append("</details>")
+        lines.append("")
+    
+    lines.append("</details>")
+    lines.append("")
+    lines.append("---")
+    
     return "\n".join(lines)
+
+
+
+
+def _extract_chunks_data(steps: list) -> dict:
+    """Extract chunks data from pipeline steps."""
+    import json
+    
+    chunks_by_category = {}
+    
+    for step in steps:
+        name = step.get("step_name", "")
+        data_str = step.get("data", "")
+        
+        if "Per-Category" in name and data_str:
+            try:
+                data = json.loads(data_str)
+                for category, cat_data in data.items():
+                    if isinstance(cat_data, dict) and "chunks" in cat_data:
+                        chunks_by_category[category] = cat_data.get("chunks", [])
+            except:
+                pass
+        
+        # Also handle single-mode search results
+        if "Search Results" in name and data_str:
+            try:
+                data = json.loads(data_str)
+                if "chunks" in data:
+                    chunks_by_category["all"] = data.get("chunks", [])
+            except:
+                pass
+    
+    return chunks_by_category
+
+
+def _extract_extractions_data(steps: list) -> dict:
+    """Extract LLM extraction results from pipeline steps."""
+    import json
+    
+    extractions = {}
+    
+    for step in steps:
+        name = step.get("step_name", "")
+        data_str = step.get("data", "")
+        
+        if "Parallel LLM" in name and data_str:
+            try:
+                data = json.loads(data_str)
+                for ext in data:
+                    if isinstance(ext, dict) and "extraction" in ext:
+                        ext_type = ext.get("extraction")
+                        extractions[ext_type] = {
+                            "items": ext.get("extracted_items", []),
+                            "count": ext.get("items_found", 0),
+                            "duration": ext.get("duration_ms", 0),
+                            "raw": ext.get("raw_response", ""),
+                        }
+            except:
+                pass
+        
+        # Single mode
+        if "JSON Parsed" in name and data_str:
+            try:
+                data = json.loads(data_str)
+                term_entry = data.get("term_entry", {})
+                for cat in ["definitions", "related_terms", "usage_evidence"]:
+                    items = term_entry.get(cat, [])
+                    extractions[cat] = {
+                        "items": items,
+                        "count": len(items),
+                    }
+            except:
+                pass
+    
+    return extractions
 
 
 def llm_view():
