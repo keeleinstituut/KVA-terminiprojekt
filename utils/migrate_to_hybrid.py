@@ -203,6 +203,14 @@ def migrate_collection(
 
 def main():
     """Main migration function."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Migrate Qdrant collection to hybrid search")
+    parser.add_argument("--yes", "-y", action="store_true", help="Skip all confirmations (for automated scripts)")
+    args = parser.parse_args()
+    
+    auto_confirm = args.yes
+    
     # Environment already loaded at module level
     
     # Get configuration
@@ -231,6 +239,16 @@ def main():
         logger.error("Collection is empty, nothing to migrate!")
         return
     
+    # Check if already a hybrid collection
+    new_collection = f"{collection_name}_hybrid"
+    if any(c.name == new_collection for c in collections):
+        # Check if it has points
+        hybrid_info = client.get_collection(new_collection)
+        if hybrid_info.points_count > 0:
+            logger.info(f"Hybrid collection '{new_collection}' already exists with {hybrid_info.points_count} points.")
+            logger.info("Skipping migration - already done.")
+            return
+    
     # Load sparse model
     logger.info(f"Loading sparse model: {sparse_model_name}")
     try:
@@ -244,7 +262,6 @@ def main():
     
     # Confirm with user
     backup_collection = f"{collection_name}_backup"
-    new_collection = f"{collection_name}_hybrid"
     
     print("\n" + "=" * 60)
     print("MIGRATION PLAN")
@@ -259,27 +276,32 @@ def main():
     print("  4. Rename collections (backup old, use new)")
     print("=" * 60)
     
-    response = input("\nProceed with migration? (yes/no): ")
-    if response.lower() != "yes":
-        logger.info("Migration cancelled.")
-        return
+    if not auto_confirm:
+        response = input("\nProceed with migration? (yes/no): ")
+        if response.lower() != "yes":
+            logger.info("Migration cancelled.")
+            return
+    else:
+        logger.info("Auto-confirm enabled, proceeding...")
     
     # Step 1: Check if backup already exists
     if any(c.name == backup_collection for c in collections):
         logger.warning(f"Backup collection '{backup_collection}' already exists!")
-        response = input("Delete existing backup and continue? (yes/no): ")
-        if response.lower() != "yes":
-            logger.info("Migration cancelled.")
-            return
+        if not auto_confirm:
+            response = input("Delete existing backup and continue? (yes/no): ")
+            if response.lower() != "yes":
+                logger.info("Migration cancelled.")
+                return
         client.delete_collection(backup_collection)
     
-    # Step 2: Check if new collection already exists
+    # Step 2: Check if new collection already exists (empty)
     if any(c.name == new_collection for c in collections):
-        logger.warning(f"New collection '{new_collection}' already exists!")
-        response = input("Delete it and continue? (yes/no): ")
-        if response.lower() != "yes":
-            logger.info("Migration cancelled.")
-            return
+        logger.warning(f"New collection '{new_collection}' already exists (empty)!")
+        if not auto_confirm:
+            response = input("Delete it and continue? (yes/no): ")
+            if response.lower() != "yes":
+                logger.info("Migration cancelled.")
+                return
         client.delete_collection(new_collection)
     
     # Step 3: Migrate to new collection
@@ -300,11 +322,12 @@ def main():
     print(f"  2. Rename '{new_collection}' -> '{collection_name}'")
     print("=" * 60)
     
-    response = input("\nProceed with rename? (yes/no): ")
-    if response.lower() != "yes":
-        logger.info(f"Rename skipped. New collection available as '{new_collection}'")
-        logger.info(f"You can manually update QDRANT_COLLECTION env var to '{new_collection}'")
-        return
+    if not auto_confirm:
+        response = input("\nProceed with rename? (yes/no): ")
+        if response.lower() != "yes":
+            logger.info(f"Rename skipped. New collection available as '{new_collection}'")
+            logger.info(f"You can manually update QDRANT_COLLECTION env var to '{new_collection}'")
+            return
     
     # Rename original to backup
     logger.info(f"Renaming '{collection_name}' to '{backup_collection}'...")

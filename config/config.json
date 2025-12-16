@@ -13,7 +13,7 @@
         "sparse_weight": 0.3
     },
     "reranking": {
-        "enabled": true,
+        "enabled": false,
         "model": "BAAI/bge-reranker-v2-m3",
         "top_k": 5
     },

@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS prompts(
 );
 
 -- Insert default prompt (skip if already exists)
-INSERT INTO prompts (prompt_type, prompt_text, description) VALUES
+INSERT INTO prompts (prompt_type, prompt_text, description, prompt_set_id) VALUES
 ('terminology_analysis', 
 '**Role:** You are a terminologist searching for terminological information about a keyword.
 
@@ -59,5 +59,6 @@ Remember:
 - relation_type must be one of: synonym, broader, narrower, abbreviation, other
 - If no items found for a category, use an empty array []
 - Response must be valid JSON only',
-'Default terminology analysis prompt for extracting definitions, related terms, and usage evidence')
-ON CONFLICT (prompt_type) DO NOTHING;
+'Default terminology analysis prompt for extracting definitions, related terms, and usage evidence',
+(SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs'))
+ON CONFLICT (prompt_type, prompt_set_id) DO NOTHING;

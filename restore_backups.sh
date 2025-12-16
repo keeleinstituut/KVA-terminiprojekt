@@ -51,6 +51,13 @@ docker-compose exec -T db psql -U postgres -d postgres < "$PG_DUMP"
 echo "PostgreSQL restore complete!"
 
 echo ""
+echo "Applying SQL migrations..."
+for migration in db/migrations/*.sql; do
+    echo "  Applying ${migration}..."
+    docker-compose exec -T db psql -U postgres -d postgres < "$migration"
+done
+
+echo ""
 echo "=== Restoring Qdrant vector database ==="
 
 # Wait for Qdrant to be ready
@@ -71,22 +78,45 @@ echo ""
 echo "Qdrant restore complete!"
 
 echo ""
-echo "=== Adding URLs to Qdrant documents ==="
+echo "=== Starting backend for migrations ==="
 echo ""
-echo "Starting backend container temporarily for migration..."
+echo "Starting backend container..."
 docker-compose up -d backend
 
 # Wait for backend to be ready
-echo "Waiting for backend to initialize..."
-sleep 15
+echo "Waiting for backend to initialize (loading ML models)..."
+sleep 30
 
-# Run the URL migration script
-echo "Running URL migration..."
-docker-compose exec -T backend python -m utils.add_urls_to_qdrant
+# Check if backend is healthy
+until curl -s http://localhost:8000/health > /dev/null 2>&1; do
+    echo "  Waiting for backend..."
+    sleep 5
+done
+echo "Backend is ready!"
+
+echo ""
+echo "=== Migrating to hybrid search ==="
+echo ""
+echo "This creates a new collection with dense+sparse vectors..."
+# Run migration with the restored collection name (not the .env hybrid name)
+docker-compose exec -T -e QDRANT_COLLECTION="${QDRANT_COLLECTION}" backend python -m utils.migrate_to_hybrid --yes
+
+echo ""
+echo "=== Adding URLs to Qdrant documents ==="
+echo ""
+echo "Running URL migration on hybrid collection..."
+# Run URL migration on the new hybrid collection
+docker-compose exec -T -e QDRANT_COLLECTION="${QDRANT_COLLECTION}_hybrid" backend python -m utils.add_urls_to_qdrant
 
 echo "URL migration complete!"
 
 echo ""
 echo "=== All databases restored successfully! ==="
+echo ""
+echo "Collections available:"
+curl -s http://localhost:6333/collections | python3 -c "import sys,json; [print(f'  - {c[\"name\"]}') for c in json.load(sys.stdin)['result']['collections']]"
+echo ""
+echo "Make sure your .env file has:"
+echo "  QDRANT_COLLECTION=${QDRANT_COLLECTION}_hybrid"
 echo ""
 echo "You can now start the full application with: docker-compose up -d"

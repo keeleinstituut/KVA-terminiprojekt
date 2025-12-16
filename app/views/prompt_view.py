@@ -1,5 +1,5 @@
 """
-Prompt Management View - allows users to view, edit, and create prompts within prompt sets.
+Prompt Management View - allows users to view and edit prompts within prompt sets.
 """
 import asyncio
 import logging
@@ -39,16 +39,6 @@ class PromptClient:
             response.raise_for_status()
             return response.json()
     
-    async def create_prompt_set(self, name: str, description: str = None) -> dict:
-        """Create a new prompt set."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/prompt-sets",
-                json={"name": name, "description": description}
-            )
-            response.raise_for_status()
-            return response.json()
-    
     async def duplicate_prompt_set(self, set_id: int, new_name: str) -> dict:
         """Duplicate a prompt set with all its prompts."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -56,13 +46,6 @@ class PromptClient:
                 f"{self.base_url}/prompt-sets/{set_id}/duplicate",
                 json={"new_name": new_name}
             )
-            response.raise_for_status()
-            return response.json()
-    
-    async def delete_prompt_set(self, set_id: int) -> dict:
-        """Delete a prompt set."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.delete(f"{self.base_url}/prompt-sets/{set_id}")
             response.raise_for_status()
             return response.json()
     
@@ -80,23 +63,6 @@ class PromptClient:
                 f"{self.base_url}/prompt-sets/{set_id}/prompts/{prompt_type}",
                 json={"prompt_text": prompt_text, "description": description}
             )
-            response.raise_for_status()
-            return response.json()
-    
-    async def create_prompt(self, set_id: int, prompt_type: str, prompt_text: str, description: str = None) -> dict:
-        """Create a new prompt within a set."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.post(
-                f"{self.base_url}/prompt-sets/{set_id}/prompts",
-                json={"prompt_type": prompt_type, "prompt_text": prompt_text, "description": description}
-            )
-            response.raise_for_status()
-            return response.json()
-    
-    async def delete_prompt(self, set_id: int, prompt_type: str) -> dict:
-        """Delete a prompt from a set."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.delete(f"{self.base_url}/prompt-sets/{set_id}/prompts/{prompt_type}")
             response.raise_for_status()
             return response.json()
 
@@ -146,12 +112,6 @@ class PromptManager(param.Parameterized):
             width=400,
         )
         
-        self.prompt_type_input = pn.widgets.TextInput(
-            name="Prompti tüüp (unikaalne ID)",
-            placeholder="nt. my_custom_prompt",
-            width=400,
-        )
-        
         self.description_input = pn.widgets.TextInput(
             name="Kirjeldus",
             placeholder="Prompti lühikirjeldus",
@@ -171,18 +131,6 @@ class PromptManager(param.Parameterized):
             width=100,
         )
         
-        self.create_new_button = pn.widgets.Button(
-            name="Loo uus prompt",
-            button_type="success",
-            width=150,
-        )
-        
-        self.delete_button = pn.widgets.Button(
-            name="Kustuta",
-            button_type="danger",
-            width=100,
-        )
-        
         self.refresh_button = pn.widgets.Button(
             name="Värskenda",
             button_type="default",
@@ -195,8 +143,6 @@ class PromptManager(param.Parameterized):
         self.set_selector.param.watch(self._on_set_selected, 'value')
         self.prompt_selector.param.watch(self._on_prompt_selected, 'value')
         self.save_button.on_click(self._on_save)
-        self.create_new_button.on_click(self._on_create_new)
-        self.delete_button.on_click(self._on_delete)
         self.refresh_button.on_click(self._on_refresh)
         self.duplicate_set_button.on_click(self._on_duplicate_set_clicked)
         self.confirm_duplicate_button.on_click(self._on_confirm_duplicate)
@@ -260,8 +206,6 @@ class PromptManager(param.Parameterized):
         try:
             prompt = await self.client.get_prompt(self.current_set_id, prompt_type)
             self.current_prompt = prompt
-            self.prompt_type_input.value = prompt.get("prompt_type", "")
-            self.prompt_type_input.disabled = True  # Can't change type of existing prompt
             self.description_input.value = prompt.get("description", "") or ""
             self.prompt_text_input.value = prompt.get("prompt_text", "")
             self.status_text.object = f"✅ Laaditud: {prompt_type}"
@@ -272,8 +216,6 @@ class PromptManager(param.Parameterized):
     def _clear_form(self):
         """Clear the prompt editing form."""
         self.current_prompt = None
-        self.prompt_type_input.value = ""
-        self.prompt_type_input.disabled = False
         self.description_input.value = ""
         self.prompt_text_input.value = ""
     
@@ -287,60 +229,24 @@ class PromptManager(param.Parameterized):
             self.status_text.object = "❌ Vali kõigepealt promptide komplekt"
             return
         
-        prompt_type = self.prompt_type_input.value.strip()
+        if not self.current_prompt:
+            self.status_text.object = "❌ Vali kõigepealt prompt muutmiseks"
+            return
+        
+        prompt_type = self.current_prompt.get("prompt_type")
         prompt_text = self.prompt_text_input.value.strip()
         description = self.description_input.value.strip() or None
-        
-        if not prompt_type:
-            self.status_text.object = "❌ Prompti tüüp on kohustuslik"
-            return
         
         if len(prompt_text) < 10:
             self.status_text.object = "❌ Prompti tekst peab olema vähemalt 10 tähemärki"
             return
         
         try:
-            if self.current_prompt:
-                # Update existing
-                await self.client.update_prompt(self.current_set_id, prompt_type, prompt_text, description)
-                self.status_text.object = f"✅ Prompt '{prompt_type}' salvestatud"
-            else:
-                # Create new
-                await self.client.create_prompt(self.current_set_id, prompt_type, prompt_text, description)
-                self.status_text.object = f"✅ Uus prompt '{prompt_type}' loodud"
-                self.prompt_type_input.disabled = True
-            
+            await self.client.update_prompt(self.current_set_id, prompt_type, prompt_text, description)
+            self.status_text.object = f"✅ Prompt '{prompt_type}' salvestatud"
             await self._load_set_prompts(self.current_set_id)
         except httpx.HTTPStatusError as e:
             self.status_text.object = f"❌ Viga: {e.response.text}"
-        except Exception as e:
-            self.status_text.object = f"❌ Viga: {e}"
-    
-    def _on_create_new(self, event):
-        """Prepare form for creating new prompt."""
-        if not self.current_set_id:
-            self.status_text.object = "❌ Vali kõigepealt promptide komplekt"
-            return
-        self._clear_form()
-        self.prompt_selector.value = None
-        self.status_text.object = "📝 Loo uus prompt"
-    
-    def _on_delete(self, event):
-        """Delete current prompt."""
-        asyncio.create_task(self._delete_prompt())
-    
-    async def _delete_prompt(self):
-        """Delete the current prompt."""
-        if not self.current_prompt or not self.current_set_id:
-            self.status_text.object = "❌ Vali kõigepealt prompt"
-            return
-        
-        prompt_type = self.prompt_type_input.value
-        try:
-            await self.client.delete_prompt(self.current_set_id, prompt_type)
-            self.status_text.object = f"✅ Prompt '{prompt_type}' kustutatud"
-            self._clear_form()
-            await self._load_set_prompts(self.current_set_id)
         except Exception as e:
             self.status_text.object = f"❌ Viga: {e}"
     
@@ -383,10 +289,17 @@ class PromptManager(param.Parameterized):
         """Create the prompt management view."""
         return pn.Column(
             pn.pane.Markdown("## Promptide haldamine"),
-            pn.pane.Markdown("Vali promptide komplekt ja muuda selle sees olevaid prompte."),
+            pn.pane.Markdown("""
+Siin saad kohandada prompte, mida süsteem kasutab terminite analüüsimiseks.
+
+**Töövoog:**
+1. Vali komplekt või kopeeri olemasolev uue nimega
+2. Vali prompt, mida soovid muuta
+3. Muuda teksti ja salvesta
+"""),
             
             # Prompt Set selection
-            pn.pane.Markdown("### Promptide komplekt"),
+            pn.pane.Markdown("### 1. Vali või kopeeri komplekt"),
             pn.Row(
                 self.set_selector,
                 self.refresh_button,
@@ -400,22 +313,16 @@ class PromptManager(param.Parameterized):
             pn.layout.Divider(),
             
             # Prompt selection within set
-            pn.pane.Markdown("### Promptid komplektis"),
-            pn.Row(
-                self.prompt_selector,
-                self.create_new_button,
-            ),
+            pn.pane.Markdown("### 2. Vali prompt muutmiseks"),
+            self.prompt_selector,
             
             pn.layout.Divider(),
             
             # Prompt editing
-            self.prompt_type_input,
+            pn.pane.Markdown("### 3. Muuda prompti teksti"),
             self.description_input,
             self.prompt_text_input,
-            pn.Row(
-                self.save_button,
-                self.delete_button,
-            ),
+            self.save_button,
             self.status_text,
             sizing_mode="stretch_width",
         )

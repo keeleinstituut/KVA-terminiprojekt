@@ -214,7 +214,7 @@ async def chat(
     Parameters:
     - debug=True: See the full pipeline with each step's input/output
     - parallel=True: Use parallel extraction mode (3 specialized prompts run simultaneously)
-    - expand_query=True: Expand query with synonyms/related terms before searching
+    - expand_query=True: Expand query per-category with category-specific prompts (each category gets its own expansion and search)
     - expand_context=True: Expand retrieved chunks with adjacent paragraphs
     """
     try:
@@ -242,7 +242,9 @@ async def chat(
                 expand_query=request.expand_query,
                 expand_context=request.expand_context,
                 use_reranking=request.use_reranking,
+                early_parallelization=request.early_parallelization,
                 output_categories=request.output_categories,
+                prompt_set_id=request.prompt_set_id,
             )
         else:
             result = service.chat(
@@ -255,6 +257,7 @@ async def chat(
                 expand_context=request.expand_context,
                 use_reranking=request.use_reranking,
                 output_categories=request.output_categories,
+                prompt_set_id=request.prompt_set_id,
             )
         
         # Convert term_entry dict to Pydantic model if present

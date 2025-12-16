@@ -101,11 +101,13 @@ class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, description="User query/keyword")
     filters: Optional[SearchFilters] = None
     prompt_type: Optional[str] = Field(default="terminology_analysis", description="Type of prompt to use for LLM (ignored in parallel mode)")
+    prompt_set_id: Optional[int] = Field(default=None, description="ID of prompt set to use (uses default if not specified)")
     debug: bool = Field(default=False, description="Enable debug mode to see full pipeline details")
     parallel: bool = Field(default=False, description="Use parallel extraction mode (3 specialized prompts run simultaneously)")
-    expand_query: bool = Field(default=False, description="Expand query with LLM-generated synonyms/related terms before searching")
+    expand_query: bool = Field(default=False, description="Expand query per-category with category-specific prompts (definitions, related_terms, usage_evidence). Each category gets its own expansion and search for better results. Default: True in parallel mode.")
     expand_context: bool = Field(default=False, description="Expand retrieved chunks with adjacent paragraphs for fuller context")
     use_reranking: bool = Field(default=True, description="Use cross-encoder reranking to improve search result relevance")
+    early_parallelization: bool = Field(default=True, description="Enable early per-category query expansion/search before running parallel extractions")
     output_categories: List[str] = Field(
         default=["definitions", "related_terms", "usage_evidence"],
         description="Categories to include in output: definitions, related_terms, usage_evidence"

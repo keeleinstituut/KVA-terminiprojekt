@@ -115,6 +115,8 @@ class BackendClient:
         expand_context: bool = False,
         use_reranking: bool = True,
         output_categories: list = None,
+        early_parallelization: bool = True,
+        prompt_set_id: int = None,
     ) -> dict:
         """Call the chat endpoint."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -130,9 +132,11 @@ class BackendClient:
                     "debug": debug,
                     "parallel": parallel,
                     "expand_query": expand_query,
+                    "early_parallelization": early_parallelization,
                     "expand_context": expand_context,
                     "use_reranking": use_reranking,
                     "output_categories": output_categories or ["definitions", "related_terms", "usage_evidence"],
+                    "prompt_set_id": prompt_set_id,
                 }
             )
             response.raise_for_status()
@@ -225,9 +229,10 @@ class FilterState:
         self.expand_query: bool = True   # Enabled by default
         self.expand_context: bool = True  # Enabled by default
         self.use_reranking: bool = True  # Enabled by default
+        self.early_parallelization: bool = True  # Enabled by default
         self.output_categories: list = ["definitions", "related_terms", "usage_evidence"]  # All enabled by default
     
-    def apply(self, files: list, limit: int, only_valid: bool, prompt_set_id: int = None, debug_mode: bool = False, parallel_mode: bool = False, expand_query: bool = False, expand_context: bool = False, use_reranking: bool = True, output_categories: list = None):
+    def apply(self, files: list, limit: int, only_valid: bool, prompt_set_id: int = None, debug_mode: bool = False, parallel_mode: bool = False, expand_query: bool = False, expand_context: bool = False, use_reranking: bool = True, output_categories: list = None, early_parallelization: bool = True):
         self.files = files
         self.limit = limit
         self.only_valid = only_valid
@@ -237,6 +242,7 @@ class FilterState:
         self.expand_query = expand_query
         self.expand_context = expand_context
         self.use_reranking = use_reranking
+        self.early_parallelization = early_parallelization
         self.output_categories = output_categories or ["definitions", "related_terms", "usage_evidence"]
 
 
@@ -311,6 +317,12 @@ class FilterActionHandler(param.Parameterized):
             value=True,  # Enabled by default
         )
         
+        self.early_parallel_checkbox = pn.widgets.Checkbox(
+            name="🧭 Early per-category search (each task expands the query separately)", 
+            width=500,
+            value=True,  # Enabled by default
+        )
+
         self.expand_context_checkbox = pn.widgets.Checkbox(
             name="📄 Context expansion (lisa külgnevad lõigud täielikuma konteksti jaoks)", 
             width=500,
@@ -429,6 +441,7 @@ class FilterActionHandler(param.Parameterized):
             expand_context=self.expand_context_checkbox.value,
             use_reranking=self.reranking_checkbox.value,
             output_categories=self.output_categories_selector.value,
+            early_parallelization=self.early_parallel_checkbox.value,
         )
         logger.info(f"Filters applied: {self.filter_state.__dict__}")
 
@@ -510,7 +523,7 @@ def llm_view():
         try:
             mode = "parallel" if filter_state.parallel_mode else "single"
             if filter_state.expand_query:
-                mode += "+expansion"
+                mode += "+per-category-expansion" if filter_state.early_parallelization else "+single-expansion"
             if filter_state.expand_context:
                 mode += "+context"
             if filter_state.use_reranking:
@@ -526,7 +539,9 @@ def llm_view():
                 expand_query=filter_state.expand_query,
                 expand_context=filter_state.expand_context,
                 use_reranking=filter_state.use_reranking,
+                early_parallelization=filter_state.early_parallelization,
                 output_categories=filter_state.output_categories,
+                prompt_set_id=filter_state.prompt_set_id,
             )
             
             response = result["response"]
@@ -650,6 +665,7 @@ def llm_view():
         pn.pane.HTML("<label><b>Arendaja valikud</b></label>"),
         filter_handler.parallel_checkbox,
         filter_handler.expand_query_checkbox,
+        filter_handler.early_parallel_checkbox,
         filter_handler.expand_context_checkbox,
         filter_handler.reranking_checkbox,
         filter_handler.debug_checkbox,

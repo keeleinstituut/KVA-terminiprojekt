@@ -1246,6 +1246,7 @@ class ChatService:
         expand_context: bool = False,
         use_reranking: bool = True,
         output_categories: List[str] = None,
+        prompt_set_id: int = None,
     ) -> Dict[str, Any]:
         """
         Process a chat query: retrieve context and generate response.
@@ -1260,6 +1261,7 @@ class ChatService:
             expand_context: If True, expand results with adjacent chunks for fuller context
             use_reranking: If True and reranking is enabled, rerank results with cross-encoder
             output_categories: List of categories to include in output (definitions, related_terms, usage_evidence)
+            prompt_set_id: ID of prompt set to use (uses default if not specified)
             
         Returns:
             Dict with response text, structured term entry, metadata, and optionally debug info
@@ -1404,12 +1406,12 @@ class ChatService:
         if debug_collector:
             debug_collector.start_step()
         
-        system_prompt = self._get_system_prompt(prompt_type)
+        system_prompt = self._get_system_prompt(prompt_type, prompt_set_id=prompt_set_id)
         
         if debug_collector:
             debug_collector.add_step(
                 "Prompt Loaded",
-                f"Loaded system prompt: '{prompt_type}'",
+                f"Loaded system prompt: '{prompt_type}' from set {prompt_set_id or 'default'}",
                 system_prompt,
                 truncate_at=2000
             )
@@ -1528,20 +1530,20 @@ class ChatService:
             
             return error_result
     
-    def _get_system_prompt(self, prompt_type: str = "terminology_analysis") -> str:
+    def _get_system_prompt(self, prompt_type: str = "terminology_analysis", prompt_set_id: int = None) -> str:
         """Get the system prompt for the LLM from database."""
         if self.prompt_service:
-            prompt_text = self.prompt_service.get_prompt_text(prompt_type)
+            prompt_text = self.prompt_service.get_prompt_text(prompt_type, set_id=prompt_set_id)
             if prompt_text:
                 # Escape curly braces for ChatPromptTemplate
                 return prompt_text.replace("{", "{{").replace("}", "}}")
         
         raise RuntimeError(f"Prompt '{prompt_type}' not found in database. Please ensure prompts are initialized.")
     
-    def _get_parallel_prompt(self, prompt_type: str) -> str:
+    def _get_parallel_prompt(self, prompt_type: str, prompt_set_id: int = None) -> str:
         """Get a parallel extraction prompt from database."""
         if self.prompt_service:
-            prompt_text = self.prompt_service.get_prompt_text(prompt_type)
+            prompt_text = self.prompt_service.get_prompt_text(prompt_type, set_id=prompt_set_id)
             if prompt_text:
                 # Escape curly braces for ChatPromptTemplate
                 return prompt_text.replace("{", "{{").replace("}", "}}")
@@ -1552,18 +1554,32 @@ class ChatService:
     # Query Expansion for enhanced search
     # =========================================================================
     
-    def _expand_query_sync(self, query: str) -> Dict[str, Any]:
+    def _expand_query_sync(self, query: str, category: str = None, prompt_set_id: int = None) -> Dict[str, Any]:
         """
         Expand a query with synonyms and related terms using LLM.
         Synchronous version for use in thread pool.
+        
+        Args:
+            query: The query to expand
+            category: Optional category-specific expansion (definitions, related_terms, usage_evidence)
+            prompt_set_id: ID of prompt set to use (uses default if not specified)
         
         Returns:
             Dict with 'original', 'expanded' (list of terms), and 'language'
         """
         from langchain_core.prompts import ChatPromptTemplate
         
-        # Get expansion prompt from DB
-        expansion_prompt = self._get_parallel_prompt("query_expansion")
+        # Get category-specific expansion prompt if category is provided, otherwise use generic
+        if category:
+            prompt_type = f"{category}_query_expansion"
+            try:
+                expansion_prompt = self._get_parallel_prompt(prompt_type, prompt_set_id=prompt_set_id)
+            except RuntimeError:
+                # Fallback to generic if category-specific doesn't exist
+                logger.warning(f"Category-specific prompt '{prompt_type}' not found, using generic")
+                expansion_prompt = self._get_parallel_prompt("query_expansion", prompt_set_id=prompt_set_id)
+        else:
+            expansion_prompt = self._get_parallel_prompt("query_expansion", prompt_set_id=prompt_set_id)
         
         chat_template = ChatPromptTemplate.from_messages([
             ("system", expansion_prompt),
@@ -1575,18 +1591,32 @@ class ChatService:
         try:
             response = self.llm.invoke(prompt_messages)
             
-            # Parse JSON response
+            # Parse JSON response - handle different formats
             import re
             json_match = re.search(r'\{[\s\S]*\}', response.content)
             if json_match:
                 parsed = json.loads(json_match.group(0))
+                
+                # Handle different output formats
+                expanded = []
+                if "expanded" in parsed:
+                    expanded = parsed.get("expanded", [])
+                elif "related term search" in parsed:
+                    expanded = parsed.get("related term search", [])
+                elif isinstance(parsed, dict):
+                    # Handle numbered keys format like {"1": "query 1", "2": "query 2"}
+                    expanded = [v for k, v in parsed.items() if isinstance(v, str) and k.isdigit()]
+                    # Also check for non-numbered string values
+                    if not expanded:
+                        expanded = [v for v in parsed.values() if isinstance(v, str)]
+                
                 return {
                     "original": query,
-                    "expanded": parsed.get("expanded", []),
+                    "expanded": expanded if isinstance(expanded, list) else [],
                     "language": parsed.get("language", "unknown"),
                 }
         except Exception as e:
-            logger.warning(f"Query expansion failed: {e}")
+            logger.warning(f"Query expansion failed for category {category}: {e}")
         
         # Return just original on failure
         return {"original": query, "expanded": [], "language": "unknown"}
@@ -1595,9 +1625,17 @@ class ChatService:
         self,
         query: str,
         executor: ThreadPoolExecutor,
+        category: str = None,
+        prompt_set_id: int = None,
     ) -> Tuple[Dict[str, Any], float]:
         """
         Async wrapper for query expansion.
+        
+        Args:
+            query: The query to expand
+            executor: Thread pool executor
+            category: Optional category-specific expansion (definitions, related_terms, usage_evidence)
+            prompt_set_id: ID of prompt set to use (uses default if not specified)
         
         Returns:
             Tuple of (expansion_result, duration_ms)
@@ -1608,14 +1646,14 @@ class ChatService:
         try:
             result = await loop.run_in_executor(
                 executor,
-                self._expand_query_sync,
-                query
+                lambda: self._expand_query_sync(query, category, prompt_set_id)
             )
             duration_ms = (time.time() - start_time) * 1000
-            logger.info(f"✓ Query expanded: {query} → +{len(result.get('expanded', []))} terms ({duration_ms:.0f}ms)")
+            category_str = f" [{category}]" if category else ""
+            logger.info(f"✓ Query expanded{category_str}: {query} → +{len(result.get('expanded', []))} terms ({duration_ms:.0f}ms)")
             return result, duration_ms
         except Exception as e:
-            logger.error(f"Query expansion error: {e}")
+            logger.error(f"Query expansion error for category {category}: {e}")
             duration_ms = (time.time() - start_time) * 1000
             return {"original": query, "expanded": [], "language": "unknown"}, duration_ms
 
@@ -1785,32 +1823,34 @@ class ChatService:
         files: List[str] = None,
         only_valid: bool = False,
         debug: bool = False,
-        expand_query: bool = False,
+        expand_query: bool = True,  # Default to True for per-category expansion
         expand_context: bool = False,
         use_reranking: bool = True,
         output_categories: List[str] = None,
+        early_parallelization: bool = True,
+        prompt_set_id: int = None,
     ) -> Dict[str, Any]:
         """
-        Process a chat query using PARALLEL extraction.
+        Process a chat query using PARALLEL extraction with per-category query expansion.
         
-        Runs three specialized prompts in parallel:
-        1. Definitions extraction
-        2. Related terms extraction  
-        3. Usage evidence extraction
+        NEW BEHAVIOR (default): Each category (definitions, related_terms, usage_evidence) gets:
+        1. Its own category-specific query expansion
+        2. Its own vector search with expanded query
+        3. Its own LLM extraction with category-specific context
         
-        Optionally expands the query with synonyms/related terms first.
-        Optionally expands context with adjacent chunks.
+        This allows each task to optimize its search for better results.
         
         Args:
             query: User query/keyword
-            limit: Number of context chunks to retrieve
+            limit: Number of context chunks to retrieve per category
             files: Filter by document titles
             only_valid: Only use valid documents
             debug: If True, collect and return debug information
-            expand_query: If True, expand query with LLM before searching
+            expand_query: If True, expand query per-category with category-specific prompts (default: True)
             expand_context: If True, expand results with adjacent chunks for fuller context
             use_reranking: If True and reranking is enabled, rerank results with cross-encoder
             output_categories: List of categories to include in output (definitions, related_terms, usage_evidence)
+            prompt_set_id: ID of prompt set to use (uses default if not specified)
             
         Returns:
             Dict with response text, structured term entry, and optionally debug info
@@ -1824,7 +1864,9 @@ class ChatService:
         if debug:
             logger.info(f"🔍 DEBUG MODE (PARALLEL) for query: {query}")
         
-        mode_str = "parallel+expansion" if expand_query else "parallel"
+        mode_str = "parallel"
+        if expand_query:
+            mode_str += "+per-category-expansion" if early_parallelization else "+single-expansion"
         if expand_context:
             mode_str += "+context"
         if use_reranking:
@@ -1849,149 +1891,6 @@ class ChatService:
                 {"limit": limit, "files": files or "All", "only_valid": only_valid, "expand_context": expand_context, "use_reranking": use_reranking}
             )
         
-        # Step 3: Query expansion (if enabled)
-        expanded_terms = []
-        if expand_query:
-            if debug_collector:
-                debug_collector.start_step()
-            
-            with ThreadPoolExecutor(max_workers=1) as expansion_executor:
-                expansion_result, expansion_duration = await self._expand_query_async(
-                    query, expansion_executor
-                )
-                expanded_terms = expansion_result.get("expanded", [])
-            
-            if debug_collector:
-                debug_collector.add_step(
-                    "Query Expansion",
-                    f"LLM expanded query with {len(expanded_terms)} additional terms",
-                    {
-                        "original": query,
-                        "expanded_terms": expanded_terms,
-                        "language": expansion_result.get("language", "unknown"),
-                        "duration_ms": round(expansion_duration, 1),
-                    }
-                )
-        
-        # Step 4: Vector search (with or without expansion)
-        if debug_collector:
-            debug_collector.start_step()
-        
-        search_debug_info = None
-        if expand_query and expanded_terms:
-            # First, capture debug info for the original query if debug mode
-            if debug:
-                _, search_debug_info = self.search_service.search(
-                    query=query,
-                    limit=limit,
-                    files=files,
-                    only_valid=only_valid,
-                    use_reranking=use_reranking,
-                    debug=True,
-                )
-            
-            # Use expanded search with deduplication
-            results = self._search_with_expansion(
-                query=query,
-                expanded_terms=expanded_terms,
-                limit=limit,
-                files=files,
-                only_valid=only_valid,
-                use_reranking=use_reranking,
-            )
-            search_desc = f"Searched with original + {len(expanded_terms)} expanded terms"
-        else:
-            # Standard search (with debug if enabled)
-            if debug:
-                results, search_debug_info = self.search_service.search(
-                    query=query,
-                    limit=limit,
-                    files=files,
-                    only_valid=only_valid,
-                    use_reranking=use_reranking,
-                    debug=True,
-                )
-            else:
-                results = self.search_service.search(
-                    query=query,
-                    limit=limit,
-                    files=files,
-                    only_valid=only_valid,
-                    use_reranking=use_reranking,
-                )
-            search_desc = "Standard hybrid search"
-        
-        if debug_collector:
-            if self.search_service.reranking_enabled and use_reranking:
-                search_desc += " + reranking"
-            search_info = {
-                "search_type": search_desc,
-                "reranking_enabled": self.search_service.reranking_enabled,
-                "reranker_model": self.config.get("reranking", {}).get("model", "N/A") if self.search_service.reranking_enabled else "N/A",
-                "results_count": len(results),
-            }
-            if expand_query:
-                search_info["expanded_terms_used"] = expanded_terms
-                # Show source distribution
-                original_count = sum(1 for r in results if r.get("_source") == "original")
-                expanded_count = sum(1 for r in results if r.get("_source") == "expanded")
-                search_info["from_original_query"] = original_count
-                search_info["from_expanded_query"] = expanded_count
-            
-            # Include detailed hybrid search debug info (for original query)
-            if search_debug_info:
-                search_info["detailed_steps"] = search_debug_info
-            
-            # Also include the final combined results with full text
-            search_info["final_results"] = [
-                {"rank": i+1, "title": r.get("title", ""), "page": r.get("page_number", 0), "score": round(r.get("score", 0), 4), "source": r.get("_source", "original"), "text": r.get("text", "")}
-                for i, r in enumerate(results)
-            ]
-            
-            debug_collector.add_step(
-                "Vector Search",
-                search_desc,
-                search_info,
-                truncate_at=500000  # Large limit to show all raw results
-            )
-        
-        # Step 4b: Context expansion with adjacent chunks
-        pre_expansion_count = len(results)
-        if expand_context and results:
-            if debug_collector:
-                debug_collector.start_step()
-            
-            results = self.search_service.expand_context(results, max_adjacent_per_result=2)
-            
-            if debug_collector:
-                debug_collector.add_step(
-                    "Context Expansion",
-                    "Expanded context with adjacent chunks from same documents",
-                    {
-                        "original_chunks": pre_expansion_count,
-                        "expanded_chunks": len(results),
-                        "adjacent_added": len(results) - pre_expansion_count,
-                    }
-                )
-        
-        # Step 5: Build context
-        if debug_collector:
-            debug_collector.start_step()
-        
-        context = self._build_context(results)
-        
-        if debug_collector:
-            debug_collector.add_step(
-                "Context Built",
-                "Formatted context for LLM",
-                context,
-                truncate_at=2000
-            )
-        
-        # Step 5: Parallel LLM extractions (only for selected categories)
-        if debug_collector:
-            debug_collector.start_step()
-        
         # Default to all categories if none specified
         if not output_categories:
             output_categories = ["definitions", "related_terms", "usage_evidence"]
@@ -1999,13 +1898,13 @@ class ChatService:
         # Load prompts only for selected categories
         prompts_loaded = {}
         if "definitions" in output_categories:
-            prompts_loaded["definitions"] = self._get_parallel_prompt("definitions_extraction")
+            prompts_loaded["definitions"] = self._get_parallel_prompt("definitions_extraction", prompt_set_id=prompt_set_id)
         if "related_terms" in output_categories:
-            prompts_loaded["related_terms"] = self._get_parallel_prompt("related_terms_extraction")
+            prompts_loaded["related_terms"] = self._get_parallel_prompt("related_terms_extraction", prompt_set_id=prompt_set_id)
         if "usage_evidence" in output_categories:
-            prompts_loaded["usage_evidence"] = self._get_parallel_prompt("usage_evidence_extraction")
+            prompts_loaded["usage_evidence"] = self._get_parallel_prompt("usage_evidence_extraction", prompt_set_id=prompt_set_id)
         # Always load see_also (it's a separate feature for navigation)
-        prompts_loaded["see_also"] = self._get_parallel_prompt("see_also_extraction")
+        prompts_loaded["see_also"] = self._get_parallel_prompt("see_also_extraction", prompt_set_id=prompt_set_id)
         
         if debug_collector:
             debug_collector.add_step(
@@ -2013,20 +1912,234 @@ class ChatService:
                 f"Loaded {len(prompts_loaded)} specialized prompts (based on selected categories)",
                 {f"{k}_prompt_length": len(v) for k, v in prompts_loaded.items()}
             )
+        
+        # Step 3: Per-category query expansion and search
+        # Each category gets its own expansion and search
+        category_contexts = {}  # category -> context string
+        category_expansions = {}  # category -> expansion info for debug
+        expanded_terms = []
+        
+        if expand_query and early_parallelization:
+            # Expand queries for each category in parallel
+            if debug_collector:
+                debug_collector.start_step()
+            
+            expansion_tasks = []
+            # Get categories that need expansion (exclude see_also)
+            categories_to_expand = [cat for cat in prompts_loaded.keys() if cat != "see_also"]
+            expansion_executor = ThreadPoolExecutor(max_workers=len(categories_to_expand))
+            for category in categories_to_expand:
+                expansion_tasks.append(
+                    self._expand_query_async(query, expansion_executor, category=category, prompt_set_id=prompt_set_id)
+                )
+            
+            expansion_results = await asyncio.gather(*expansion_tasks, return_exceptions=True)
+            expansion_executor.shutdown(wait=False)
+            
+            # Process expansion results and perform searches
+            for idx, category in enumerate(categories_to_expand):
+                expansion_result, expansion_duration = expansion_results[idx]
+                
+                if isinstance(expansion_result, Exception):
+                    logger.error(f"Expansion failed for {category}: {expansion_result}")
+                    expanded_terms = []
+                    language = "unknown"
+                else:
+                    expanded_terms = expansion_result.get("expanded", [])
+                    language = expansion_result.get("language", "unknown")
+                
+                category_expansions[category] = {
+                    "expanded_terms": expanded_terms,
+                    "language": language,
+                    "duration_ms": round(expansion_duration, 1),
+                }
+                
+                if expanded_terms:
+                    category_results = self._search_with_expansion(
+                        query=query,
+                        expanded_terms=expanded_terms,
+                        limit=limit,
+                        files=files,
+                        only_valid=only_valid,
+                        use_reranking=use_reranking,
+                    )
+                else:
+                    category_results = self.search_service.search(
+                        query=query,
+                        limit=limit,
+                        files=files,
+                        only_valid=only_valid,
+                        use_reranking=use_reranking,
+                    )
+                
+                if expand_context and category_results:
+                    category_results = self.search_service.expand_context(
+                        category_results, max_adjacent_per_result=2
+                    )
+                
+                category_contexts[category] = self._build_context(category_results)
+            
+            see_also_context_category = "definitions" if "definitions" in category_contexts else list(category_contexts.keys())[0] if category_contexts else None
+            if see_also_context_category:
+                category_contexts["see_also"] = category_contexts[see_also_context_category]
+            else:
+                category_contexts["see_also"] = ""
+            
+            if debug_collector:
+                expansion_debug_info = {}
+                for category, exp_info in category_expansions.items():
+                    expansion_debug_info[category] = {
+                        "expanded_terms": exp_info["expanded_terms"],
+                        "language": exp_info["language"],
+                        "duration_ms": exp_info["duration_ms"],
+                        "context_chunks": len(category_contexts.get(category, "").split("\n\n")) if category in category_contexts else 0,
+                    }
+                
+                debug_collector.add_step(
+                    "Per-Category Query Expansion & Search",
+                    f"Expanded and searched for {len(category_expansions)} categories",
+                    expansion_debug_info
+                )
+        else:
+            if debug_collector:
+                debug_collector.start_step()
+
+            expansion_result = None
+            expansion_duration = 0
+            if expand_query:
+                with ThreadPoolExecutor(max_workers=1) as expansion_executor:
+                    expansion_result, expansion_duration = await self._expand_query_async(
+                        query, expansion_executor, prompt_set_id=prompt_set_id
+                    )
+                expanded_terms = expansion_result.get("expanded", [])
+                if debug_collector:
+                    debug_collector.add_step(
+                        "Query Expansion",
+                        f"LLM expanded query with {len(expanded_terms)} additional terms",
+                        {
+                            "original": query,
+                            "expanded_terms": expanded_terms,
+                            "language": expansion_result.get("language", "unknown"),
+                            "duration_ms": round(expansion_duration, 1),
+                        }
+                    )
+
+            if expand_query and expanded_terms:
+                if debug:
+                    _, search_debug_info = self.search_service.search(
+                        query=query,
+                        limit=limit,
+                        files=files,
+                        only_valid=only_valid,
+                        use_reranking=use_reranking,
+                        debug=True,
+                    )
+                results = self._search_with_expansion(
+                    query=query,
+                    expanded_terms=expanded_terms,
+                    limit=limit,
+                    files=files,
+                    only_valid=only_valid,
+                    use_reranking=use_reranking,
+                )
+                search_desc = f"Searched with original + {len(expanded_terms)} expanded terms"
+            else:
+                if debug:
+                    results, search_debug_info = self.search_service.search(
+                        query=query,
+                        limit=limit,
+                        files=files,
+                        only_valid=only_valid,
+                        use_reranking=use_reranking,
+                        debug=True,
+                    )
+                else:
+                    results = self.search_service.search(
+                        query=query,
+                        limit=limit,
+                        files=files,
+                        only_valid=only_valid,
+                        use_reranking=use_reranking,
+                    )
+                search_desc = "Standard hybrid search"
+
+            if debug_collector:
+                if self.search_service.reranking_enabled and use_reranking:
+                    search_desc += " + reranking"
+                search_info = {
+                    "search_type": search_desc,
+                    "reranking_enabled": self.search_service.reranking_enabled,
+                    "reranker_model": self.config.get("reranking", {}).get("model", "N/A") if self.search_service.reranking_enabled else "N/A",
+                    "results_count": len(results),
+                }
+                if expand_query:
+                    search_info["expanded_terms_used"] = expanded_terms
+                    original_count = sum(1 for r in results if r.get("_source") == "original")
+                    expanded_count = sum(1 for r in results if r.get("_source") == "expanded")
+                    search_info["from_original_query"] = original_count
+                    search_info["from_expanded_query"] = expanded_count
+                if search_debug_info:
+                    search_info["detailed_steps"] = search_debug_info
+                search_info["final_results"] = [
+                    {"rank": i+1, "title": r.get("title", ""), "page": r.get("page_number", 0), "score": round(r.get("score", 0), 4), "source": r.get("_source", "original"), "text": r.get("text", "")}
+                    for i, r in enumerate(results)
+                ]
+                debug_collector.add_step(
+                    "Vector Search",
+                    search_desc,
+                    search_info,
+                    truncate_at=500000
+                )
+
+            pre_expansion_count = len(results)
+            if expand_context and results:
+                if debug_collector:
+                    debug_collector.start_step()
+                results = self.search_service.expand_context(results, max_adjacent_per_result=2)
+                if debug_collector:
+                    debug_collector.add_step(
+                        "Context Expansion",
+                        "Expanded context with adjacent chunks from same documents",
+                        {
+                            "original_chunks": pre_expansion_count,
+                            "expanded_chunks": len(results),
+                            "adjacent_added": len(results) - pre_expansion_count,
+                        }
+                    )
+
+            if debug_collector:
+                debug_collector.start_step()
+
+            shared_context = self._build_context(results)
+            if debug_collector:
+                debug_collector.add_step(
+                    "Context Built",
+                    "Formatted context for LLM",
+                    shared_context,
+                    truncate_at=2000
+                )
+
+            # Use same context for all categories (shared search)
+            for category in prompts_loaded.keys():
+                category_contexts[category] = shared_context
+        
+        # Step 4: Parallel LLM extractions (each with its own context)
+        if debug_collector:
             debug_collector.start_step()
         
         # Create thread pool for parallel LLM calls
         num_tasks = len(prompts_loaded)
         with ThreadPoolExecutor(max_workers=num_tasks) as executor:
-            # Launch only the selected extractions in parallel
+            # Launch only the selected extractions in parallel, each with its own context
             tasks = []
             for ext_type, prompt in prompts_loaded.items():
+                category_context = category_contexts.get(ext_type, "")
                 tasks.append(
                     self._extract_single(
                         ext_type,
                         prompt,
                         query,
-                        context,
+                        category_context,
                         executor
                     )
                 )
@@ -2090,7 +2203,11 @@ class ChatService:
         term_entry = self._deduplicate_term_entry(term_entry)
         
         # Calculate match quality for user transparency
-        expanded_query_used = expand_query and len(expanded_terms) > 0
+        # Check if any category had expansion
+        expanded_query_used = expand_query and any(
+            len(exp_info.get("expanded_terms", [])) > 0 
+            for exp_info in category_expansions.values()
+        ) if expand_query else False
         match_quality = self._calculate_match_quality(term_entry, expanded_query_used)
         term_entry["match_quality"] = match_quality
         
@@ -2118,10 +2235,15 @@ class ChatService:
         
         logger.info(f"✅ Parallel extraction complete for: {query}")
         
+        # Calculate total context chunks used
+        total_context_chunks = sum(
+            len(ctx.split("\n\n")) for ctx in category_contexts.values()
+        ) if category_contexts else 0
+        
         result = {
             "response": formatted_response,
             "term_entry": term_entry,
-            "context_used": len(results),
+            "context_used": total_context_chunks,
         }
         
         if debug_collector:
