@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from io import BytesIO
 from urllib.parse import quote
 
 import fitz  # PyMuPDF
@@ -45,11 +44,15 @@ class DebugCollector:
         """Mark the start of a new step."""
         self._step_start = time.time()
     
-    def add_step(self, step_name: str, description: str, data: Any = None, truncate_at: int = 2000):
+    def add_step(self, step_name: str, description: str, data: Any = None, truncate_at: int = None):
         """Add a pipeline step with timing."""
         duration_ms = (time.time() - self._step_start) * 1000 if self._step_start else 0
         
-        # Convert data to string and truncate if needed
+        # Convert data to string - no truncation by default (or use very large limit for debug mode)
+        # Default truncate_at is None (no truncation) for full debugging
+        if truncate_at is None:
+            truncate_at = 10_000_000  # 10MB limit - effectively no truncation
+        
         data_str = None
         if data is not None:
             if isinstance(data, str):
@@ -1235,328 +1238,6 @@ class ChatService:
         
         return "\n".join(lines)
     
-    def chat(
-        self,
-        query: str,
-        limit: int = 5,
-        files: List[str] = None,
-        only_valid: bool = False,
-        prompt_type: str = "terminology_analysis",
-        debug: bool = False,
-        expand_context: bool = False,
-        use_reranking: bool = True,
-        output_categories: List[str] = None,
-        prompt_set_id: int = None,
-    ) -> Dict[str, Any]:
-        """
-        Process a chat query: retrieve context and generate response.
-        
-        Args:
-            query: User query/keyword
-            limit: Number of context chunks to retrieve
-            files: Filter by document titles
-            only_valid: Only use valid documents
-            prompt_type: Type of prompt to use from database
-            debug: If True, collect and return debug information for each pipeline step
-            expand_context: If True, expand results with adjacent chunks for fuller context
-            use_reranking: If True and reranking is enabled, rerank results with cross-encoder
-            output_categories: List of categories to include in output (definitions, related_terms, usage_evidence)
-            prompt_set_id: ID of prompt set to use (uses default if not specified)
-            
-        Returns:
-            Dict with response text, structured term entry, metadata, and optionally debug info
-        """
-        if not self._initialized:
-            raise RuntimeError("ChatService not initialized")
-        
-        from langchain_core.prompts import ChatPromptTemplate
-        
-        # Initialize debug collector if debug mode is enabled
-        debug_collector = DebugCollector() if debug else None
-        
-        if debug:
-            logger.info(f"🔍 DEBUG MODE ENABLED for query: {query}")
-        
-        # Step 1: Query received
-        if debug_collector:
-            debug_collector.start_step()
-            debug_collector.add_step(
-                "Query Received",
-                "Original user query received by the system",
-                {"query": query}
-            )
-        
-        # Step 2: Filters applied
-        if debug_collector:
-            debug_collector.start_step()
-            filter_info = {
-                "limit": limit,
-                "files": files if files else "All documents",
-                "only_valid": only_valid,
-                "prompt_type": prompt_type,
-                "expand_context": expand_context,
-                "use_reranking": use_reranking,
-            }
-            debug_collector.add_step(
-                "Filters Applied",
-                "Search filters and parameters configured for this query",
-                filter_info
-            )
-        
-        # Step 3: Vector search
-        if debug_collector:
-            debug_collector.start_step()
-        
-        # Use debug search if debug mode is enabled
-        search_debug_info = None
-        if debug:
-            results, search_debug_info = self.search_service.search(
-                query=query,
-                limit=limit,
-                files=files,
-                only_valid=only_valid,
-                use_reranking=use_reranking,
-                debug=True,
-            )
-        else:
-            results = self.search_service.search(
-                query=query,
-                limit=limit,
-                files=files,
-                only_valid=only_valid,
-                use_reranking=use_reranking,
-            )
-        
-        # Step 3b: Context expansion with adjacent chunks
-        original_count = len(results)
-        if expand_context and results:
-            if debug_collector:
-                debug_collector.start_step()
-            
-            results = self.search_service.expand_context(results, max_adjacent_per_result=2)
-            
-            if debug_collector:
-                debug_collector.add_step(
-                    "Context Expansion",
-                    f"Expanded context with adjacent chunks from same documents",
-                    {
-                        "original_chunks": original_count,
-                        "expanded_chunks": len(results),
-                        "adjacent_added": len(results) - original_count,
-                    }
-                )
-        
-        if debug_collector:
-            search_type = "hybrid (dense + sparse)" if self.search_service.hybrid_enabled else "dense only"
-            if self.search_service.reranking_enabled:
-                search_type += " + reranking"
-            
-            # Include detailed search debug info if available
-            search_step_data = {
-                "search_type": search_type,
-                "reranking_enabled": self.search_service.reranking_enabled,
-                "reranker_model": self.config.get("reranking", {}).get("model", "N/A") if self.search_service.reranking_enabled else "N/A",
-                "collection": self.search_service.collection_name,
-                "results_count": len(results),
-            }
-            if search_debug_info:
-                search_step_data["detailed_steps"] = search_debug_info
-            
-            debug_collector.add_step(
-                "Vector Search",
-                f"Performed {search_type} search in Qdrant database",
-                search_step_data,
-                truncate_at=500000  # Large limit to show all raw results
-            )
-        
-        # Step 4: Search results
-        if debug_collector:
-            debug_collector.start_step()
-            results_summary = [
-                {
-                    "rank": i+1,
-                    "title": r.get("title", ""),
-                    "page": r.get("page_number", 0),
-                    "score": round(r.get("score", 0), 4),
-                    "source": r.get("_source", "original"),
-                    "text_preview": r.get("text", "")[:300] + "..." if len(r.get("text", "")) > 300 else r.get("text", ""),
-                    "text_full": r.get("text", ""),  # Full text for detailed view
-                    "text_length": len(r.get("text", "")),
-                }
-                for i, r in enumerate(results)
-            ]
-            debug_collector.add_step(
-                "Search Results",
-                f"Retrieved {len(results)} relevant document chunks",
-                {
-                    "total_chunks": len(results),
-                    "chunks": results_summary,
-                },
-                truncate_at=500000  # Allow more data for full chunks
-            )
-        
-        # Step 5: Build context
-        if debug_collector:
-            debug_collector.start_step()
-        
-        context = self._build_context(results)
-        
-        if debug_collector:
-            debug_collector.add_step(
-                "Context Built",
-                "Formatted search results into context string for LLM",
-                context,
-                truncate_at=3000
-            )
-        
-        # Step 6: Load system prompt
-        if debug_collector:
-            debug_collector.start_step()
-        
-        system_prompt = self._get_system_prompt(prompt_type, prompt_set_id=prompt_set_id)
-        
-        if debug_collector:
-            debug_collector.add_step(
-                "Prompt Loaded",
-                f"Loaded system prompt: '{prompt_type}' from set {prompt_set_id or 'default'}",
-                system_prompt,
-                truncate_at=2000
-            )
-        
-        # Step 7: Build full prompt
-        if debug_collector:
-            debug_collector.start_step()
-        
-        chat_template = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", "Keyword: {user_input}"),
-            ("human", "Key sections:\n{retrieval_results}"),
-        ])
-        
-        prompt = chat_template.format_messages(
-            user_input=query,
-            retrieval_results=context
-        )
-        
-        if debug_collector:
-            # Format prompt messages for display
-            prompt_display = []
-            for msg in prompt:
-                content_preview = msg.content[:500] + "..." if len(msg.content) > 500 else msg.content
-                prompt_display.append({
-                    "role": msg.type,
-                    "content_length": len(msg.content),
-                    "content_preview": content_preview,
-                })
-            debug_collector.add_step(
-                "Full Prompt Formed",
-                "Complete prompt assembled with system prompt, user query, and context",
-                prompt_display,
-                truncate_at=3000
-            )
-        
-        # Step 8: LLM invocation
-        if debug_collector:
-            debug_collector.start_step()
-        
-        try:
-            response = self.llm.invoke(prompt)
-            raw_llm_response = response.content
-            
-            if debug_collector:
-                debug_collector.add_step(
-                    "LLM Response",
-                    f"Received response from {self.config['llm']['model']}",
-                    raw_llm_response,
-                    truncate_at=4000
-                )
-            
-            # Step 9: Parse JSON
-            if debug_collector:
-                debug_collector.start_step()
-            
-            term_entry = self._parse_llm_json(response.content, query)
-            
-            if debug_collector:
-                # Show what was extracted and chunks that were available
-                extraction_summary = {
-                    "chunks_available": len(results),
-                    "extracted": {
-                        "definitions": len(term_entry.get("definitions", [])),
-                        "related_terms": len(term_entry.get("related_terms", [])),
-                        "usage_evidence": len(term_entry.get("usage_evidence", [])),
-                    },
-                    "term_entry": term_entry,
-                }
-                debug_collector.add_step(
-                    "JSON Parsed",
-                    "Extracted structured term entry from LLM response",
-                    extraction_summary,
-                    truncate_at=5000
-                )
-            
-            # Step 10: Format response
-            if debug_collector:
-                debug_collector.start_step()
-            
-            formatted_response = self._format_term_entry(term_entry, output_categories=output_categories)
-            
-            if debug_collector:
-                debug_collector.add_step(
-                    "Response Formatted",
-                    "Converted structured data to human-readable markdown",
-                    formatted_response,
-                    truncate_at=2000
-                )
-            
-            result = {
-                "response": formatted_response,
-                "term_entry": term_entry,
-                "context_used": len(results),
-            }
-            
-            # Add debug info if enabled
-            if debug_collector:
-                debug_info = debug_collector.to_dict()
-                debug_info["search_type"] = "hybrid" if self.search_service.hybrid_enabled else "dense"
-                debug_info["model_used"] = self.config["llm"]["model"]
-                debug_info["embedding_model"] = self.config["embeddings"]["embedding_model"]
-                result["debug_info"] = debug_info
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"LLM error: {e}")
-            error_result = {
-                "response": "Ilmnes viga, vabandust. Proovi uuesti.",
-                "term_entry": None,
-                "context_used": len(results),
-            }
-            
-            if debug_collector:
-                debug_collector.add_step(
-                    "Error",
-                    f"An error occurred during LLM processing",
-                    {"error": str(e)}
-                )
-                debug_info = debug_collector.to_dict()
-                debug_info["search_type"] = "hybrid" if self.search_service.hybrid_enabled else "dense"
-                debug_info["model_used"] = self.config["llm"]["model"]
-                debug_info["embedding_model"] = self.config["embeddings"]["embedding_model"]
-                error_result["debug_info"] = debug_info
-            
-            return error_result
-    
-    def _get_system_prompt(self, prompt_type: str = "terminology_analysis", prompt_set_id: int = None) -> str:
-        """Get the system prompt for the LLM from database."""
-        if self.prompt_service:
-            prompt_text = self.prompt_service.get_prompt_text(prompt_type, set_id=prompt_set_id)
-            if prompt_text:
-                # Escape curly braces for ChatPromptTemplate
-                return prompt_text.replace("{", "{{").replace("}", "}}")
-        
-        raise RuntimeError(f"Prompt '{prompt_type}' not found in database. Please ensure prompts are initialized.")
-    
     def _get_parallel_prompt(self, prompt_type: str, prompt_set_id: int = None) -> str:
         """Get a parallel extraction prompt from database."""
         if self.prompt_service:
@@ -1571,7 +1252,7 @@ class ChatService:
     # Query Expansion for enhanced search
     # =========================================================================
     
-    def _expand_query_sync(self, query: str, category: str = None, prompt_set_id: int = None) -> Dict[str, Any]:
+    def _expand_query_sync(self, query: str, category: str = None, prompt_set_id: int = None, debug_collector: 'DebugCollector' = None) -> Dict[str, Any]:
         """
         Expand a query with synonyms and related terms using LLM.
         Synchronous version for use in thread pool.
@@ -1580,23 +1261,19 @@ class ChatService:
             query: The query to expand
             category: Optional category-specific expansion (definitions, related_terms, usage_evidence)
             prompt_set_id: ID of prompt set to use (uses default if not specified)
+            debug_collector: Optional debug collector for logging
         
         Returns:
             Dict with 'original', 'expanded' (list of terms), and 'language'
         """
         from langchain_core.prompts import ChatPromptTemplate
         
-        # Get category-specific expansion prompt if category is provided, otherwise use generic
-        if category:
-            prompt_type = f"{category}_query_expansion"
-            try:
-                expansion_prompt = self._get_parallel_prompt(prompt_type, prompt_set_id=prompt_set_id)
-            except RuntimeError:
-                # Fallback to generic if category-specific doesn't exist
-                logger.warning(f"Category-specific prompt '{prompt_type}' not found, using generic")
-                expansion_prompt = self._get_parallel_prompt("query_expansion", prompt_set_id=prompt_set_id)
-        else:
-            expansion_prompt = self._get_parallel_prompt("query_expansion", prompt_set_id=prompt_set_id)
+        # Always use category-specific expansion prompt
+        if not category:
+            raise ValueError("Category must be provided for query expansion (definitions, related_terms, or usage_evidence)")
+        
+        prompt_type = f"{category}_query_expansion"
+        expansion_prompt = self._get_parallel_prompt(prompt_type, prompt_set_id=prompt_set_id)
         
         chat_template = ChatPromptTemplate.from_messages([
             ("system", expansion_prompt),
@@ -1605,8 +1282,34 @@ class ChatService:
         
         prompt_messages = chat_template.format_messages(query=query)
         
+        # Log LLM input for debugging
+        if debug_collector:
+            prompt_text = "\n".join([f"{msg.type}: {msg.content}" for msg in prompt_messages])
+            debug_collector.add_step(
+                f"Query Expansion LLM Input [{category or 'generic'}]",
+                f"Full prompt sent to LLM for query expansion",
+                {
+                    "prompt_type": prompt_type,
+                    "category": category,
+                    "query": query,
+                    "full_prompt": prompt_text,
+                    "system_prompt": expansion_prompt,
+                }
+            )
+        
         try:
             response = self.llm.invoke(prompt_messages)
+            
+            # Log LLM output for debugging
+            if debug_collector:
+                debug_collector.add_step(
+                    f"Query Expansion LLM Output [{category or 'generic'}]",
+                    f"Raw response from LLM",
+                    {
+                        "raw_response": response.content,
+                        "response_length": len(response.content),
+                    }
+                )
             
             # Parse JSON response - handle different formats
             import re
@@ -1644,6 +1347,7 @@ class ChatService:
         executor: ThreadPoolExecutor,
         category: str = None,
         prompt_set_id: int = None,
+        debug_collector: 'DebugCollector' = None,
     ) -> Tuple[Dict[str, Any], float]:
         """
         Async wrapper for query expansion.
@@ -1653,6 +1357,7 @@ class ChatService:
             executor: Thread pool executor
             category: Optional category-specific expansion (definitions, related_terms, usage_evidence)
             prompt_set_id: ID of prompt set to use (uses default if not specified)
+            debug_collector: Optional debug collector for logging
         
         Returns:
             Tuple of (expansion_result, duration_ms)
@@ -1663,7 +1368,7 @@ class ChatService:
         try:
             result = await loop.run_in_executor(
                 executor,
-                lambda: self._expand_query_sync(query, category, prompt_set_id)
+                lambda: self._expand_query_sync(query, category, prompt_set_id, debug_collector)
             )
             duration_ms = (time.time() - start_time) * 1000
             category_str = f" [{category}]" if category else ""
@@ -1768,12 +1473,13 @@ class ChatService:
         query: str,
         context: str,
         executor: ThreadPoolExecutor,
-    ) -> Tuple[str, Dict[str, Any], float]:
+        debug_collector: 'DebugCollector' = None,
+    ) -> Tuple[str, Dict[str, Any], float, str]:
         """
         Extract a single category (definitions/related_terms/usage_evidence).
         
         Returns:
-            Tuple of (extraction_type, parsed_result, duration_ms)
+            Tuple of (extraction_type, parsed_result, duration_ms, raw_response)
         """
         from langchain_core.prompts import ChatPromptTemplate
         
@@ -1790,6 +1496,22 @@ class ChatService:
             retrieval_results=context
         )
         
+        # Log LLM input for debugging
+        if debug_collector:
+            prompt_text = "\n".join([f"{msg.type}: {msg.content}" for msg in prompt_messages])
+            debug_collector.add_step(
+                f"Parallel LLM Input [{extraction_type}]",
+                f"Full prompt sent to LLM for {extraction_type} extraction",
+                {
+                    "extraction_type": extraction_type,
+                    "query": query,
+                    "context_length": len(context),
+                    "context_preview": context[:500] + "..." if len(context) > 500 else context,
+                    "full_prompt": prompt_text,
+                    "system_prompt": prompt_template,
+                }
+            )
+        
         loop = asyncio.get_event_loop()
         
         try:
@@ -1799,6 +1521,17 @@ class ChatService:
                 self._invoke_llm_sync,
                 prompt_messages
             )
+            
+            # Log LLM output for debugging
+            if debug_collector:
+                debug_collector.add_step(
+                    f"Parallel LLM Output [{extraction_type}]",
+                    f"Raw response from LLM for {extraction_type}",
+                    {
+                        "raw_response": raw_response,
+                        "response_length": len(raw_response),
+                    }
+                )
             
             # Parse the JSON response
             parsed = self._parse_extraction_json(raw_response, extraction_type)
@@ -1810,7 +1543,14 @@ class ChatService:
         except Exception as e:
             logger.error(f"✗ {extraction_type} extraction failed: {e}")
             duration_ms = (time.time() - start_time) * 1000
-            return (extraction_type, {}, duration_ms, str(e))
+            error_msg = str(e)
+            if debug_collector:
+                debug_collector.add_step(
+                    f"Parallel LLM Error [{extraction_type}]",
+                    f"LLM call failed: {error_msg}",
+                    {"error": error_msg}
+                )
+            return (extraction_type, {}, duration_ms, error_msg)
     
     def _parse_extraction_json(self, content: str, extraction_type: str) -> Dict[str, Any]:
         """Parse JSON from a single extraction response."""
@@ -1883,30 +1623,15 @@ class ChatService:
         
         mode_str = "parallel"
         if expand_query:
-            mode_str += "+per-category-expansion" if early_parallelization else "+single-expansion"
+            mode_str += "+per-category-expansion"
         if expand_context:
             mode_str += "+context"
         if use_reranking:
             mode_str += "+reranking"
         logger.info(f"🚀 Starting {mode_str.upper()} extraction for: {query}")
         
-        # Step 1: Query received
-        if debug_collector:
-            debug_collector.start_step()
-            debug_collector.add_step(
-                "Query Received",
-                f"Original user query received ({mode_str} mode)",
-                {"query": query, "mode": mode_str, "expand_query": expand_query, "expand_context": expand_context, "use_reranking": use_reranking}
-            )
-        
-        # Step 2: Filters applied
-        if debug_collector:
-            debug_collector.start_step()
-            debug_collector.add_step(
-                "Filters Applied",
-                "Search filters configured",
-                {"limit": limit, "files": files or "All", "only_valid": only_valid, "expand_context": expand_context, "use_reranking": use_reranking}
-            )
+        # Step 1: Query received (not logged - query is visible in debug header)
+        # Step 2: Filters applied (not logged - not useful debug info)
         
         # Default to all categories if none specified
         if not output_categories:
@@ -1923,12 +1648,7 @@ class ChatService:
         # Always load see_also (it's a separate feature for navigation)
         prompts_loaded["see_also"] = self._get_parallel_prompt("see_also_extraction", prompt_set_id=prompt_set_id)
         
-        if debug_collector:
-            debug_collector.add_step(
-                "Prompts Loaded",
-                f"Loaded {len(prompts_loaded)} specialized prompts (based on selected categories)",
-                {f"{k}_prompt_length": len(v) for k, v in prompts_loaded.items()}
-            )
+        # Prompts loaded (not logged - not useful debug info)
         
         # Step 3: Per-category query expansion and search
         # Each category gets its own expansion and search
@@ -1937,7 +1657,8 @@ class ChatService:
         category_expansions = {}  # category -> expansion info for debug
         expanded_terms = []
         
-        if expand_query and early_parallelization:
+        # Always use per-category query expansion and search
+        if expand_query:
             # Expand queries for each category in parallel
             if debug_collector:
                 debug_collector.start_step()
@@ -1948,7 +1669,7 @@ class ChatService:
             expansion_executor = ThreadPoolExecutor(max_workers=len(categories_to_expand))
             for category in categories_to_expand:
                 expansion_tasks.append(
-                    self._expand_query_async(query, expansion_executor, category=category, prompt_set_id=prompt_set_id)
+                    self._expand_query_async(query, expansion_executor, category=category, prompt_set_id=prompt_set_id, debug_collector=debug_collector)
                 )
             
             expansion_results = await asyncio.gather(*expansion_tasks, return_exceptions=True)
@@ -1998,168 +1719,66 @@ class ChatService:
                 # Store results for debug
                 category_results_dict[category] = category_results
                 category_contexts[category] = self._build_context(category_results)
-            
-            see_also_context_category = "definitions" if "definitions" in category_contexts else list(category_contexts.keys())[0] if category_contexts else None
-            if see_also_context_category:
-                category_contexts["see_also"] = category_contexts[see_also_context_category]
-                category_results_dict["see_also"] = category_results_dict.get(see_also_context_category, [])
-            else:
-                category_contexts["see_also"] = ""
-                category_results_dict["see_also"] = []
-            
-            if debug_collector:
-                expansion_debug_info = {}
-                for category, exp_info in category_expansions.items():
-                    chunks = category_results_dict.get(category, [])
-                    expansion_debug_info[category] = {
-                        "expanded_terms": exp_info["expanded_terms"],
-                        "language": exp_info["language"],
-                        "duration_ms": exp_info["duration_ms"],
-                        "chunks_retrieved": len(chunks),
-                        "chunks": [
-                            {
-                                "rank": i+1,
-                                "title": r.get("title", ""),
-                                "page": r.get("page_number", 0),
-                                "score": round(r.get("score", 0), 4),
-                                "source": r.get("_source", "original"),
-                                "text_preview": r.get("text", "")[:300] + "..." if len(r.get("text", "")) > 300 else r.get("text", ""),
-                                "text_full": r.get("text", ""),  # Full text for detailed view
-                                "text_length": len(r.get("text", "")),
-                            }
-                            for i, r in enumerate(chunks)
-                        ],
-                    }
-                
-                debug_collector.add_step(
-                    "Per-Category Query Expansion & Search",
-                    f"Expanded and searched for {len(category_expansions)} categories",
-                    expansion_debug_info,
-                    truncate_at=500000  # Allow more data for full chunks
-                )
         else:
-            if debug_collector:
-                debug_collector.start_step()
-
-            expansion_result = None
-            expansion_duration = 0
-            if expand_query:
-                with ThreadPoolExecutor(max_workers=1) as expansion_executor:
-                    expansion_result, expansion_duration = await self._expand_query_async(
-                        query, expansion_executor, prompt_set_id=prompt_set_id
-                    )
-                expanded_terms = expansion_result.get("expanded", [])
-                if debug_collector:
-                    debug_collector.add_step(
-                        "Query Expansion",
-                        f"LLM expanded query with {len(expanded_terms)} additional terms",
-                        {
-                            "original": query,
-                            "expanded_terms": expanded_terms,
-                            "language": expansion_result.get("language", "unknown"),
-                            "duration_ms": round(expansion_duration, 1),
-                        }
-                    )
-
-            if expand_query and expanded_terms:
-                if debug:
-                    _, search_debug_info = self.search_service.search(
-                        query=query,
-                        limit=limit,
-                        files=files,
-                        only_valid=only_valid,
-                        use_reranking=use_reranking,
-                        debug=True,
-                    )
-                results = self._search_with_expansion(
-                    query=query,
-                    expanded_terms=expanded_terms,
-                    limit=limit,
-                    files=files,
-                    only_valid=only_valid,
-                    use_reranking=use_reranking,
-                )
-                search_desc = f"Searched with original + {len(expanded_terms)} expanded terms"
-            else:
-                if debug:
-                    results, search_debug_info = self.search_service.search(
-                        query=query,
-                        limit=limit,
-                        files=files,
-                        only_valid=only_valid,
-                        use_reranking=use_reranking,
-                        debug=True,
-                    )
-                else:
-                    results = self.search_service.search(
-                        query=query,
-                        limit=limit,
-                        files=files,
-                        only_valid=only_valid,
-                        use_reranking=use_reranking,
-                    )
-                search_desc = "Standard hybrid search"
-
-            if debug_collector:
-                if self.search_service.reranking_enabled and use_reranking:
-                    search_desc += " + reranking"
-                search_info = {
-                    "search_type": search_desc,
-                    "reranking_enabled": self.search_service.reranking_enabled,
-                    "reranker_model": self.config.get("reranking", {}).get("model", "N/A") if self.search_service.reranking_enabled else "N/A",
-                    "results_count": len(results),
-                }
-                if expand_query:
-                    search_info["expanded_terms_used"] = expanded_terms
-                    original_count = sum(1 for r in results if r.get("_source") == "original")
-                    expanded_count = sum(1 for r in results if r.get("_source") == "expanded")
-                    search_info["from_original_query"] = original_count
-                    search_info["from_expanded_query"] = expanded_count
-                if search_debug_info:
-                    search_info["detailed_steps"] = search_debug_info
-                search_info["final_results"] = [
-                    {"rank": i+1, "title": r.get("title", ""), "page": r.get("page_number", 0), "score": round(r.get("score", 0), 4), "source": r.get("_source", "original"), "text": r.get("text", "")}
-                    for i, r in enumerate(results)
-                ]
-                debug_collector.add_step(
-                    "Vector Search",
-                    search_desc,
-                    search_info,
-                    truncate_at=500000
-                )
-
-            pre_expansion_count = len(results)
+            # No query expansion - use standard search for all categories
+            results = self.search_service.search(
+                query=query,
+                limit=limit,
+                files=files,
+                only_valid=only_valid,
+                use_reranking=use_reranking,
+            )
+            
             if expand_context and results:
-                if debug_collector:
-                    debug_collector.start_step()
-                results = self.search_service.expand_context(results, max_adjacent_per_result=2)
-                if debug_collector:
-                    debug_collector.add_step(
-                        "Context Expansion",
-                        "Expanded context with adjacent chunks from same documents",
-                        {
-                            "original_chunks": pre_expansion_count,
-                            "expanded_chunks": len(results),
-                            "adjacent_added": len(results) - pre_expansion_count,
-                        }
-                    )
-
-            if debug_collector:
-                debug_collector.start_step()
-
-            shared_context = self._build_context(results)
-            if debug_collector:
-                debug_collector.add_step(
-                    "Context Built",
-                    "Formatted context for LLM",
-                    shared_context,
-                    truncate_at=2000
+                results = self.search_service.expand_context(
+                    results, max_adjacent_per_result=2
                 )
-
-            # Use same context for all categories (shared search)
+            
+            shared_context = self._build_context(results)
+            # Use same context for all categories
             for category in prompts_loaded.keys():
                 category_contexts[category] = shared_context
-                category_results_dict[category] = results  # Store shared results for debug
+                category_results_dict[category] = results
+        
+        # Set see_also context from first available category
+        see_also_context_category = "definitions" if "definitions" in category_contexts else list(category_contexts.keys())[0] if category_contexts else None
+        if see_also_context_category:
+            category_contexts["see_also"] = category_contexts[see_also_context_category]
+            category_results_dict["see_also"] = category_results_dict.get(see_also_context_category, [])
+        else:
+            category_contexts["see_also"] = ""
+            category_results_dict["see_also"] = []
+        
+        if debug_collector and expand_query and category_expansions:
+            expansion_debug_info = {}
+            for category, exp_info in category_expansions.items():
+                chunks = category_results_dict.get(category, [])
+                expansion_debug_info[category] = {
+                    "expanded_terms": exp_info["expanded_terms"],
+                    "language": exp_info["language"],
+                    "duration_ms": exp_info["duration_ms"],
+                    "chunks_retrieved": len(chunks),
+                    "chunks": [
+                        {
+                            "rank": i+1,
+                            "title": r.get("title", ""),
+                            "page": r.get("page_number", 0),
+                            "score": round(r.get("score", 0), 4),
+                            "source": r.get("_source", "original"),
+                            "text_preview": r.get("text", "")[:300] + "..." if len(r.get("text", "")) > 300 else r.get("text", ""),
+                            "text_full": r.get("text", ""),  # Full text for detailed view
+                            "text_length": len(r.get("text", "")),
+                        }
+                        for i, r in enumerate(chunks)
+                    ],
+                }
+            
+            debug_collector.add_step(
+                "Per-Category Query Expansion & Search",
+                f"Expanded and searched for {len(category_expansions)} categories",
+                expansion_debug_info,
+                truncate_at=500000  # Allow more data for full chunks
+            )
         
         # Step 4: Parallel LLM extractions (each with its own context)
         if debug_collector:
@@ -2178,7 +1797,8 @@ class ChatService:
                         prompt,
                         query,
                         category_context,
-                        executor
+                        executor,
+                        debug_collector=debug_collector
                     )
                 )
             
@@ -2438,141 +2058,6 @@ class PromptService:
         """Get the default prompt set ID."""
         return self._default_set_id
     
-    def create_prompt_set(self, name: str, description: Optional[str] = None, is_default: bool = False) -> Dict[str, Any]:
-        """Create a new prompt set."""
-        con = self._get_db_connection()
-        try:
-            # If making this the default, unset other defaults first
-            if is_default:
-                con.execute_sql("UPDATE prompt_sets SET is_default = FALSE WHERE is_default = TRUE", [{}])
-            
-            result = con.execute_sql(
-                """INSERT INTO prompt_sets (name, description, is_default)
-                   VALUES (:name, :desc, :is_default)
-                   RETURNING id, name, date_created""",
-                [{"name": name, "desc": description, "is_default": is_default}]
-            )
-            con.commit()
-            
-            if result.get("data"):
-                self._refresh_cache()
-                return {
-                    "success": True,
-                    "message": "Prompt set created successfully",
-                    "id": result["data"][0][0],
-                    "name": name,
-                }
-            return {"success": False, "message": "Failed to create prompt set"}
-        except Exception as e:
-            if "unique" in str(e).lower():
-                return {"success": False, "message": f"Prompt set '{name}' already exists"}
-            return {"success": False, "message": str(e)}
-        finally:
-            con.close()
-    
-    def update_prompt_set(self, set_id: int, name: Optional[str] = None, description: Optional[str] = None, is_default: Optional[bool] = None) -> Dict[str, Any]:
-        """Update a prompt set."""
-        con = self._get_db_connection()
-        try:
-            updates = []
-            params = {"set_id": set_id}
-            
-            if name is not None:
-                updates.append("name = :name")
-                params["name"] = name
-            if description is not None:
-                updates.append("description = :desc")
-                params["desc"] = description
-            if is_default is not None:
-                if is_default:
-                    # Unset other defaults first
-                    con.execute_sql("UPDATE prompt_sets SET is_default = FALSE WHERE is_default = TRUE", [{}])
-                updates.append("is_default = :is_default")
-                params["is_default"] = is_default
-            
-            if not updates:
-                return {"success": False, "message": "No updates provided"}
-            
-            updates.append("date_modified = CURRENT_TIMESTAMP")
-            
-            result = con.execute_sql(
-                f"UPDATE prompt_sets SET {', '.join(updates)} WHERE id = :set_id RETURNING id",
-                [params]
-            )
-            con.commit()
-            
-            if result.get("data"):
-                self._refresh_cache()
-                return {"success": True, "message": "Prompt set updated successfully"}
-            return {"success": False, "message": "Prompt set not found"}
-        finally:
-            con.close()
-    
-    def delete_prompt_set(self, set_id: int) -> Dict[str, Any]:
-        """Delete a prompt set and all its prompts."""
-        con = self._get_db_connection()
-        try:
-            result = con.execute_sql(
-                "DELETE FROM prompt_sets WHERE id = :set_id RETURNING id",
-                [{"set_id": set_id}]
-            )
-            con.commit()
-            
-            if result.get("data"):
-                self._refresh_cache()
-                return {"success": True, "message": "Prompt set deleted successfully"}
-            return {"success": False, "message": "Prompt set not found"}
-        finally:
-            con.close()
-    
-    def duplicate_prompt_set(self, set_id: int, new_name: str) -> Dict[str, Any]:
-        """Duplicate a prompt set with all its prompts."""
-        con = self._get_db_connection()
-        try:
-            # Get original set
-            original_set = self._sets_cache.get(set_id)
-            if not original_set:
-                return {"success": False, "message": "Original prompt set not found"}
-            
-            # Create new set
-            new_set_result = con.execute_sql(
-                """INSERT INTO prompt_sets (name, description, is_default)
-                   VALUES (:name, :desc, FALSE)
-                   RETURNING id""",
-                [{"name": new_name, "desc": original_set.get("description")}]
-            )
-            
-            if not new_set_result.get("data"):
-                return {"success": False, "message": "Failed to create new prompt set"}
-            
-            new_set_id = new_set_result["data"][0][0]
-            
-            # Copy all prompts from original set
-            original_prompts = self._prompts_cache.get(set_id, {})
-            for prompt in original_prompts.values():
-                con.execute_sql(
-                    """INSERT INTO prompts (prompt_type, prompt_text, description, prompt_set_id)
-                       VALUES (:ptype, :text, :desc, :set_id)""",
-                    [{"ptype": prompt["prompt_type"], "text": prompt["prompt_text"], 
-                      "desc": prompt.get("description"), "set_id": new_set_id}]
-                )
-            
-            con.commit()
-            self._refresh_cache()
-            
-            return {
-                "success": True,
-                "message": f"Prompt set duplicated successfully with {len(original_prompts)} prompts",
-                "id": new_set_id,
-                "name": new_name,
-            }
-        except Exception as e:
-            if "unique" in str(e).lower():
-                return {"success": False, "message": f"Prompt set '{new_name}' already exists"}
-            return {"success": False, "message": str(e)}
-        finally:
-            con.close()
-    
     # =========================================================================
     # Prompt Methods (within a set)
     # =========================================================================
@@ -2662,60 +2147,6 @@ class PromptService:
                     "prompt_set_id": target_set_id,
                     "date_modified": str(result["data"][0][2]) if result["data"][0][2] else None,
                 }
-            else:
-                return {"success": False, "message": f"Prompt type '{prompt_type}' not found in set {target_set_id}"}
-        finally:
-            con.close()
-    
-    def create_prompt(self, prompt_type: str, prompt_text: str, description: Optional[str] = None, set_id: Optional[int] = None) -> Dict[str, Any]:
-        """Create a new prompt within a set."""
-        target_set_id = set_id if set_id is not None else self._default_set_id
-        if target_set_id is None:
-            return {"success": False, "message": "No prompt set specified and no default set found"}
-        
-        con = self._get_db_connection()
-        try:
-            result = con.execute_sql(
-                """INSERT INTO prompts (prompt_type, prompt_text, description, prompt_set_id)
-                   VALUES (:ptype, :text, :desc, :set_id)
-                   RETURNING id, prompt_type, date_created""",
-                [{"ptype": prompt_type, "text": prompt_text, "desc": description, "set_id": target_set_id}]
-            )
-            con.commit()
-            
-            if result.get("data"):
-                self._refresh_cache()
-                return {
-                    "success": True,
-                    "message": "Prompt created successfully",
-                    "id": result["data"][0][0],
-                    "prompt_type": prompt_type,
-                    "prompt_set_id": target_set_id,
-                }
-            else:
-                return {"success": False, "message": "Failed to create prompt"}
-        except IntegrityError:
-            return {"success": False, "message": f"Prompt type '{prompt_type}' already exists in this set"}
-        finally:
-            con.close()
-    
-    def delete_prompt(self, prompt_type: str, set_id: Optional[int] = None) -> Dict[str, Any]:
-        """Delete a prompt from a set."""
-        target_set_id = set_id if set_id is not None else self._default_set_id
-        if target_set_id is None:
-            return {"success": False, "message": "No prompt set specified and no default set found"}
-        
-        con = self._get_db_connection()
-        try:
-            result = con.execute_sql(
-                "DELETE FROM prompts WHERE prompt_type = :ptype AND prompt_set_id = :set_id RETURNING id",
-                [{"ptype": prompt_type, "set_id": target_set_id}]
-            )
-            con.commit()
-            
-            if result.get("data"):
-                self._refresh_cache()
-                return {"success": True, "message": "Prompt deleted successfully"}
             else:
                 return {"success": False, "message": f"Prompt type '{prompt_type}' not found in set {target_set_id}"}
         finally:

@@ -38,8 +38,8 @@ from backend.schemas import (
     FiltersResponse, DocumentInfo, KeywordInfo,
     UploadMetadata, UploadResponse,
     DocumentDetail, DocumentListItem, DocumentsListResponse, DocumentUpdate, DocumentDeleteResponse,
-    PromptSetInfo, PromptSetDetail, PromptSetCreate, PromptSetUpdate, PromptSetDuplicate, PromptSetsListResponse,
-    PromptInfo, PromptDetail, PromptUpdate, PromptCreate, PromptsListResponse,
+    PromptSetInfo, PromptSetDetail, PromptSetsListResponse,
+    PromptDetail, PromptUpdate,
 )
 from backend.services import SearchService, ChatService, UploadService, PromptService
 from utils.db_connection import Connection
@@ -205,15 +205,14 @@ async def chat(
     service: ChatService = Depends(get_chat_service),
 ):
     """
-    Process a terminology query using RAG (Retrieval Augmented Generation).
+    Process a terminology query using RAG (Retrieval Augmented Generation) with parallel extraction mode.
     
     1. Retrieves relevant context from the document database
-    2. Generates a comprehensive term entry using LLM
+    2. Generates a comprehensive term entry using LLM with specialized parallel prompts
     3. Returns both formatted text and structured data
     
     Parameters:
     - debug=True: See the full pipeline with each step's input/output
-    - parallel=True: Use parallel extraction mode (3 specialized prompts run simultaneously)
     - expand_query=True: Expand query per-category with category-specific prompts (each category gets its own expansion and search)
     - expand_context=True: Expand retrieved chunks with adjacent paragraphs
     """
@@ -223,42 +222,29 @@ async def chat(
         files = filters.files if hasattr(filters, 'files') else None
         only_valid = filters.only_valid if hasattr(filters, 'only_valid') else False
         
-        # Choose between parallel or single extraction mode
-        if request.parallel:
-            mode = "PARALLEL"
-            if request.expand_query:
-                mode += "+EXPANSION"
-            if request.expand_context:
-                mode += "+CONTEXT"
-            if request.use_reranking:
-                mode += "+RERANKING"
-            logger.info(f"Using {mode} extraction mode for query: {request.query}")
-            result = await service.chat_parallel(
-                query=request.query,
-                limit=limit,
-                files=files,
-                only_valid=only_valid,
-                debug=request.debug,
-                expand_query=request.expand_query,
-                expand_context=request.expand_context,
-                use_reranking=request.use_reranking,
-                early_parallelization=request.early_parallelization,
-                output_categories=request.output_categories,
-                prompt_set_id=request.prompt_set_id,
-            )
-        else:
-            result = service.chat(
-                query=request.query,
-                limit=limit,
-                files=files,
-                only_valid=only_valid,
-                prompt_type=request.prompt_type or "terminology_analysis",
-                debug=request.debug,
-                expand_context=request.expand_context,
-                use_reranking=request.use_reranking,
-                output_categories=request.output_categories,
-                prompt_set_id=request.prompt_set_id,
-            )
+        # Always use parallel extraction mode
+        mode = "PARALLEL"
+        if request.expand_query:
+            mode += "+EXPANSION"
+        if request.expand_context:
+            mode += "+CONTEXT"
+        if request.use_reranking:
+            mode += "+RERANKING"
+        logger.info(f"Using {mode} extraction mode for query: {request.query}")
+        
+        result = await service.chat_parallel(
+            query=request.query,
+            limit=limit,
+            files=files,
+            only_valid=only_valid,
+            debug=request.debug,
+            expand_query=request.expand_query,
+            expand_context=request.expand_context,
+            use_reranking=request.use_reranking,
+            early_parallelization=request.early_parallelization,
+            output_categories=request.output_categories,
+            prompt_set_id=request.prompt_set_id,
+        )
         
         # Convert term_entry dict to Pydantic model if present
         term_entry = None
@@ -613,18 +599,19 @@ async def delete_document(
     return DocumentDeleteResponse(**result)
 
 
-# ============== Prompt Set Management Routes ==============
+# ============== Prompt Management Routes (Simplified) ==============
 
-@app.get("/prompt-sets", response_model=PromptSetsListResponse, tags=["Prompt Sets"])
+@app.get("/prompt-sets", response_model=PromptSetsListResponse, tags=["Prompts"])
 async def list_prompt_sets(service: PromptService = Depends(get_prompt_service)):
     """
     List all available prompt sets.
+    Used to find the default prompt set ID.
     """
     prompt_sets = service.get_all_prompt_sets()
     return PromptSetsListResponse(prompt_sets=[PromptSetInfo(**s) for s in prompt_sets])
 
 
-@app.get("/prompt-sets/{set_id}", response_model=PromptSetDetail, tags=["Prompt Sets"])
+@app.get("/prompt-sets/{set_id}", response_model=PromptSetDetail, tags=["Prompts"])
 async def get_prompt_set(
     set_id: int,
     service: PromptService = Depends(get_prompt_service),
@@ -636,87 +623,6 @@ async def get_prompt_set(
     if not prompt_set:
         raise HTTPException(status_code=404, detail=f"Prompt set {set_id} not found")
     return PromptSetDetail(**prompt_set)
-
-
-@app.post("/prompt-sets", tags=["Prompt Sets"])
-async def create_prompt_set(
-    request: PromptSetCreate,
-    service: PromptService = Depends(get_prompt_service),
-):
-    """
-    Create a new prompt set.
-    """
-    result = service.create_prompt_set(
-        name=request.name,
-        description=request.description,
-        is_default=request.is_default,
-    )
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("message"))
-    return result
-
-
-@app.put("/prompt-sets/{set_id}", tags=["Prompt Sets"])
-async def update_prompt_set(
-    set_id: int,
-    request: PromptSetUpdate,
-    service: PromptService = Depends(get_prompt_service),
-):
-    """
-    Update a prompt set.
-    """
-    result = service.update_prompt_set(
-        set_id=set_id,
-        name=request.name,
-        description=request.description,
-        is_default=request.is_default,
-    )
-    if not result.get("success"):
-        raise HTTPException(status_code=404, detail=result.get("message"))
-    return result
-
-
-@app.delete("/prompt-sets/{set_id}", tags=["Prompt Sets"])
-async def delete_prompt_set(
-    set_id: int,
-    service: PromptService = Depends(get_prompt_service),
-):
-    """
-    Delete a prompt set and all its prompts.
-    """
-    result = service.delete_prompt_set(set_id)
-    if not result.get("success"):
-        raise HTTPException(status_code=404, detail=result.get("message"))
-    return result
-
-
-@app.post("/prompt-sets/{set_id}/duplicate", tags=["Prompt Sets"])
-async def duplicate_prompt_set(
-    set_id: int,
-    request: PromptSetDuplicate,
-    service: PromptService = Depends(get_prompt_service),
-):
-    """
-    Duplicate a prompt set with all its prompts.
-    """
-    result = service.duplicate_prompt_set(set_id, request.new_name)
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("message"))
-    return result
-
-
-# ============== Prompt Management Routes (within sets) ==============
-
-@app.get("/prompts", response_model=PromptsListResponse, tags=["Prompts"])
-async def list_prompts(
-    set_id: int = None,
-    service: PromptService = Depends(get_prompt_service),
-):
-    """
-    List all prompts, optionally filtered by set.
-    """
-    prompts = service.get_all_prompts(set_id=set_id)
-    return PromptsListResponse(prompts=[PromptInfo(**p) for p in prompts])
 
 
 @app.get("/prompt-sets/{set_id}/prompts/{prompt_type}", response_model=PromptDetail, tags=["Prompts"])
@@ -750,41 +656,6 @@ async def update_prompt(
         description=request.description,
         set_id=set_id,
     )
-    if not result.get("success"):
-        raise HTTPException(status_code=404, detail=result.get("message"))
-    return result
-
-
-@app.post("/prompt-sets/{set_id}/prompts", tags=["Prompts"])
-async def create_prompt(
-    set_id: int,
-    request: PromptCreate,
-    service: PromptService = Depends(get_prompt_service),
-):
-    """
-    Create a new prompt within a set.
-    """
-    result = service.create_prompt(
-        prompt_type=request.prompt_type,
-        prompt_text=request.prompt_text,
-        description=request.description,
-        set_id=set_id,
-    )
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("message"))
-    return result
-
-
-@app.delete("/prompt-sets/{set_id}/prompts/{prompt_type}", tags=["Prompts"])
-async def delete_prompt(
-    set_id: int,
-    prompt_type: str,
-    service: PromptService = Depends(get_prompt_service),
-):
-    """
-    Delete a prompt from a set.
-    """
-    result = service.delete_prompt(prompt_type, set_id=set_id)
     if not result.get("success"):
         raise HTTPException(status_code=404, detail=result.get("message"))
     return result

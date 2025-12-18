@@ -3,9 +3,9 @@ LLM View - Panel frontend that calls the FastAPI backend.
 No heavy model loading here - all processing done by backend.
 """
 import asyncio
+import json
 import logging
 import os
-from typing import Optional
 
 import httpx
 import panel as pn
@@ -70,6 +70,34 @@ CONNECTION_PARAMS = {
 logger = logging.getLogger("app")
 logger.setLevel(logging.INFO)
 
+# Load config.json to get reranking setting
+def load_reranking_config():
+    """Load reranking enabled status from config.json"""
+    # Try multiple possible paths
+    possible_paths = [
+        os.getenv('APP_CONFIG'),
+        os.path.join(os.path.dirname(__file__), '..', '..', 'config', 'config.json'),
+        '/app/config/config.json',  # Docker path
+        os.path.join(os.path.dirname(__file__), '..', 'config', 'config.json'),
+    ]
+    
+    for config_path in possible_paths:
+        if config_path and os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    enabled = config.get('reranking', {}).get('enabled', False)
+                    logger.info(f"Loaded reranking config from {config_path}: enabled={enabled}")
+                    return enabled
+            except Exception as e:
+                logger.warning(f"Failed to load config.json from {config_path}: {e}")
+                continue
+    
+    logger.warning("Could not find config.json, defaulting reranking to False")
+    return False
+
+RERANKING_ENABLED = load_reranking_config()
+
 
 class BackendClient:
     """
@@ -110,15 +138,13 @@ class BackendClient:
         files: list = None,
         only_valid: bool = False,
         debug: bool = False,
-        parallel: bool = False,
-        expand_query: bool = False,
+        expand_query: bool = True,
         expand_context: bool = False,
         use_reranking: bool = True,
         output_categories: list = None,
         early_parallelization: bool = True,
-        prompt_set_id: int = None,
     ) -> dict:
-        """Call the chat endpoint."""
+        """Call the chat endpoint (always uses parallel extraction mode)."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(
                 f"{self.base_url}/chat",
@@ -130,13 +156,11 @@ class BackendClient:
                         "only_valid": only_valid,
                     },
                     "debug": debug,
-                    "parallel": parallel,
                     "expand_query": expand_query,
                     "early_parallelization": early_parallelization,
                     "expand_context": expand_context,
                     "use_reranking": use_reranking,
                     "output_categories": output_categories or ["definitions", "related_terms", "usage_evidence"],
-                    "prompt_set_id": prompt_set_id,
                 }
             )
             response.raise_for_status()
@@ -150,69 +174,6 @@ class BackendClient:
                 return response.status_code == 200
         except Exception:
             return False
-    
-    async def get_prompt_sets(self) -> list:
-        """Get all available prompt sets."""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{self.base_url}/prompt-sets")
-                response.raise_for_status()
-                return response.json().get("prompt_sets", [])
-        except Exception as e:
-            logger.error(f"Failed to fetch prompt sets: {e}")
-            return []
-    
-    async def get_prompt_set(self, set_id: int) -> dict:
-        """Get a specific prompt set with its prompts."""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{self.base_url}/prompt-sets/{set_id}")
-                response.raise_for_status()
-                return response.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch prompt set: {e}")
-            return {}
-    
-    async def get_prompts(self, set_id: int = None) -> list:
-        """Get all available prompts, optionally filtered by set."""
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                url = f"{self.base_url}/prompts"
-                if set_id is not None:
-                    url += f"?set_id={set_id}"
-                response = await client.get(url)
-                response.raise_for_status()
-                return response.json().get("prompts", [])
-        except Exception as e:
-            logger.error(f"Failed to fetch prompts: {e}")
-            return []
-    
-    async def get_prompt(self, set_id: int, prompt_type: str) -> dict:
-        """Get a specific prompt within a set."""
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{self.base_url}/prompt-sets/{set_id}/prompts/{prompt_type}")
-            response.raise_for_status()
-            return response.json()
-    
-    async def update_prompt(self, set_id: int, prompt_type: str, prompt_text: str, description: str = None) -> dict:
-        """Update a prompt within a set."""
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.put(
-                f"{self.base_url}/prompt-sets/{set_id}/prompts/{prompt_type}",
-                json={"prompt_text": prompt_text, "description": description}
-            )
-            response.raise_for_status()
-            return response.json()
-    
-    async def create_prompt(self, set_id: int, prompt_type: str, prompt_text: str, description: str = None) -> dict:
-        """Create a new prompt within a set."""
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                f"{self.base_url}/prompt-sets/{set_id}/prompts",
-                json={"prompt_type": prompt_type, "prompt_text": prompt_text, "description": description}
-            )
-            response.raise_for_status()
-            return response.json()
 
 
 class FilterState:
@@ -223,22 +184,20 @@ class FilterState:
         self.files: list = []
         self.limit: int = 8  # Increased from 5 for better term diversity
         self.only_valid: bool = False
-        self.prompt_set_id: int = None  # Uses default prompt set if None
         self.debug_mode: bool = False
-        self.parallel_mode: bool = True  # Enabled by default
-        self.expand_query: bool = True   # Enabled by default
-        self.expand_context: bool = True  # Enabled by default
-        self.use_reranking: bool = True  # Enabled by default
-        self.early_parallelization: bool = True  # Enabled by default
+        self.parallel_mode: bool = True  # Always enabled
+        self.expand_query: bool = True   # Always enabled
+        self.expand_context: bool = False  # Always disabled
+        self.use_reranking: bool = RERANKING_ENABLED  # From config.json
+        self.early_parallelization: bool = True  # Always enabled
         self.output_categories: list = ["definitions", "related_terms", "usage_evidence"]  # All enabled by default
     
-    def apply(self, files: list, limit: int, only_valid: bool, prompt_set_id: int = None, debug_mode: bool = False, parallel_mode: bool = False, expand_query: bool = False, expand_context: bool = False, use_reranking: bool = True, output_categories: list = None, early_parallelization: bool = True):
+    def apply(self, files: list, limit: int, only_valid: bool, debug_mode: bool = False, expand_query: bool = True, expand_context: bool = False, use_reranking: bool = True, output_categories: list = None, early_parallelization: bool = True):
         self.files = files
         self.limit = limit
         self.only_valid = only_valid
-        self.prompt_set_id = prompt_set_id
         self.debug_mode = debug_mode
-        self.parallel_mode = parallel_mode
+        # parallel_mode is always True (removed as parameter)
         self.expand_query = expand_query
         self.expand_context = expand_context
         self.use_reranking = use_reranking
@@ -292,47 +251,10 @@ class FilterActionHandler(param.Parameterized):
             name="Otsi ainult kehtivatest", width=500
         )
         
-        self.prompt_set_selector = pn.widgets.Select(
-            name="Promptide komplekt",
-            options={"Vaikimisi terminoloogiaanalüüs": None},  # None means default
-            value=None,
-            width=500,
-        )
-        
         self.debug_checkbox = pn.widgets.Checkbox(
             name="🔍 Debug mode (näita pipeline'i samme)", 
             width=500,
             value=False,
-        )
-        
-        self.parallel_checkbox = pn.widgets.Checkbox(
-            name="⚡ Parallel mode (3 spetsialiseeritud prompti paralleelselt)", 
-            width=500,
-            value=True,  # Enabled by default
-        )
-        
-        self.expand_query_checkbox = pn.widgets.Checkbox(
-            name="🔄 Query expansion (laienda päringut sünonüümide/seotud terminitega)", 
-            width=500,
-            value=True,  # Enabled by default
-        )
-        
-        self.early_parallel_checkbox = pn.widgets.Checkbox(
-            name="🧭 Early per-category search (each task expands the query separately)", 
-            width=500,
-            value=True,  # Enabled by default
-        )
-
-        self.expand_context_checkbox = pn.widgets.Checkbox(
-            name="📄 Context expansion (lisa külgnevad lõigud täielikuma konteksti jaoks)", 
-            width=500,
-            value=True,  # Enabled by default
-        )
-        
-        self.reranking_checkbox = pn.widgets.Checkbox(
-            name="🎯 Reranking (järjesta tulemused cross-encoder mudeliga täpsemaks)", 
-            width=500,
-            value=True,  # Enabled by default
         )
         
         self.output_categories_selector = pn.widgets.CheckBoxGroup(
@@ -348,31 +270,6 @@ class FilterActionHandler(param.Parameterized):
 
         super().__init__(**params)
         self.refresh_selectors()
-        # Load prompt sets asynchronously
-        asyncio.create_task(self._load_prompt_sets())
-
-    async def _load_prompt_sets(self):
-        """Load prompt sets from backend."""
-        try:
-            prompt_sets = await self.backend_client.get_prompt_sets()
-            if prompt_sets:
-                options = {}
-                default_set_id = None
-                for ps in prompt_sets:
-                    label = ps.get("name", "Unknown")
-                    if ps.get("is_default"):
-                        label += " ✓"
-                        default_set_id = ps.get("id")
-                    prompt_count = ps.get("prompt_count", 0)
-                    label += f" ({prompt_count} prompti)"
-                    options[label] = ps.get("id")
-                self.prompt_set_selector.options = options
-                # Set to default prompt set
-                if default_set_id is not None:
-                    self.prompt_set_selector.value = default_set_id
-                logger.info(f"Loaded {len(prompt_sets)} prompt sets")
-        except Exception as e:
-            logger.error(f"Failed to load prompt sets: {e}")
     
     def load_keywords_from_db(self):
         try:
@@ -434,14 +331,12 @@ class FilterActionHandler(param.Parameterized):
             files=self.file_selector.value,
             limit=self.limit_slider.value,
             only_valid=self.validity_checkbox.value,
-            prompt_set_id=self.prompt_set_selector.value,
             debug_mode=self.debug_checkbox.value,
-            parallel_mode=self.parallel_checkbox.value,
-            expand_query=self.expand_query_checkbox.value,
-            expand_context=self.expand_context_checkbox.value,
-            use_reranking=self.reranking_checkbox.value,
+            expand_query=True,  # Always enabled
+            expand_context=False,  # Always disabled
+            use_reranking=RERANKING_ENABLED,  # From config.json
             output_categories=self.output_categories_selector.value,
-            early_parallelization=self.early_parallel_checkbox.value,
+            early_parallelization=True,  # Always enabled
         )
         logger.info(f"Filters applied: {self.filter_state.__dict__}")
 
@@ -537,20 +432,17 @@ def _format_debug_output(debug_info: dict) -> str:
             lines.append("")
             
             if expanded:
-                lines.append(f"**Laiendatud otsing:** {', '.join(expanded[:5])}{'...' if len(expanded) > 5 else ''}")
+                lines.append(f"**Laiendatud otsing:** {', '.join(expanded)}")
                 lines.append("")
             
             lines.append(f"**Leitud {len(chunks)} lõiku:**")
             lines.append("")
             
-            for i, chunk in enumerate(chunks[:5], 1):
-                title = chunk.get("title", "?")[:40]
+            for i, chunk in enumerate(chunks, 1):  # Show all chunks
+                title = chunk.get("title", "?")
                 page = chunk.get("page", "?")
                 score = chunk.get("score", 0)
-                lines.append(f"{i}. *{title}...* (lk {page}, skoor {score:.2f})")
-            
-            if len(chunks) > 5:
-                lines.append(f"   *... +{len(chunks) - 5} veel*")
+                lines.append(f"{i}. *{title}* (lk {page}, skoor {score:.2f})")
             lines.append("")
             
             # Expandable full chunks
@@ -564,7 +456,7 @@ def _format_debug_output(debug_info: dict) -> str:
                     text = chunk.get("text_full", chunk.get("text_preview", ""))
                     lines.append(f"**{i}. {title} (lk {page})**")
                     lines.append("```")
-                    lines.append(text[:500] + ("..." if len(text) > 500 else ""))
+                    lines.append(text)  # Full text, no truncation
                     lines.append("```")
                     lines.append("")
                 lines.append("</details>")
@@ -590,21 +482,18 @@ def _format_debug_output(debug_info: dict) -> str:
             lines.append("")
             
             if items:
-                for i, item in enumerate(items[:5], 1):
+                for i, item in enumerate(items, 1):  # Show all items
                     if isinstance(item, dict):
-                        text = item.get("text", item.get("term", str(item)))[:150]
+                        text = item.get("text", item.get("term", str(item)))
                         source = item.get("source", "")
                         page = item.get("page", "")
                         if source:
-                            lines.append(f"{i}. ✅ {text}{'...' if len(str(item.get('text', ''))) > 150 else ''}")
-                            lines.append(f"   *← {source[:40]}{'...' if len(source) > 40 else ''}, lk {page}*")
+                            lines.append(f"{i}. ✅ {text}")
+                            lines.append(f"   *← {source}, lk {page}*")
                         else:
                             lines.append(f"{i}. ✅ {text}")
                     else:
                         lines.append(f"{i}. ✅ {item}")
-                
-                if len(items) > 5:
-                    lines.append(f"   *... +{len(items) - 5} veel*")
             else:
                 lines.append("*(midagi ei leitud)*")
             
@@ -639,28 +528,170 @@ def _format_debug_output(debug_info: dict) -> str:
             used_count = 0
             lines.append(f"**{cat_label}:**")
             
-            for chunk in chunks[:8]:
+            for chunk in chunks:  # Show all chunks
                 title = chunk.get("title", "?")
                 page = chunk.get("page", "?")
                 key = f"{title}|{page}"
                 
                 if key in used_sources:
-                    lines.append(f"- ✅ {title[:35]}... (lk {page})")
+                    lines.append(f"- ✅ {title} (lk {page})")
                     used_count += 1
                 else:
-                    lines.append(f"- ⬜ {title[:35]}... (lk {page})")
-            
-            if len(chunks) > 8:
-                lines.append(f"  *... +{len(chunks) - 8} veel*")
+                    lines.append(f"- ⬜ {title} (lk {page})")
             
             efficiency = f"{(used_count/len(chunks)*100):.0f}%" if chunks else "0%"
             lines.append(f"  **Kasutatud: {used_count}/{len(chunks)} ({efficiency})**")
             lines.append("")
     
-    # Detailed raw data (collapsed)
+    # LLM Call Details - Show full inputs and outputs (collapsible)
+    lines.append("---")
+    lines.append("### 🔬 LLM Kõned (täielik sisend ja väljund)")
+    lines.append("")
+    
+    # Find all LLM-related steps and group them by call
+    llm_steps = []
+    for step in steps:
+        step_name = step.get("step_name", "")
+        if "LLM" in step_name or "Query Expansion" in step_name:
+            llm_steps.append(step)
+    
+    # Group input/output pairs together
+    if llm_steps:
+        # Group steps by their base name (e.g., "Query Expansion LLM Input [definitions]" pairs with "Query Expansion LLM Output [definitions]")
+        llm_calls = {}
+        for step in llm_steps:
+            step_name = step.get("step_name", "")
+            # Extract the call identifier (e.g., "[definitions]" or "[generic]")
+            import re
+            match = re.search(r'\[([^\]]+)\]', step_name)
+            call_id = match.group(1) if match else "unknown"
+            
+            # Determine if it's input or output
+            if "Input" in step_name:
+                call_key = f"{call_id}_input"
+            elif "Output" in step_name or "Response" in step_name:
+                call_key = f"{call_id}_output"
+            else:
+                call_key = f"{call_id}_other"
+            
+            if call_id not in llm_calls:
+                llm_calls[call_id] = {}
+            llm_calls[call_id][call_key] = step
+        
+        # Render each LLM call as a collapsible section
+        for call_id, call_steps in sorted(llm_calls.items()):
+            input_step = call_steps.get(f"{call_id}_input")
+            output_step = call_steps.get(f"{call_id}_output")
+            
+            # Create a summary title
+            if input_step:
+                step_name = input_step.get("step_name", "")
+                duration = input_step.get("duration_ms", 0)
+                if output_step:
+                    duration += output_step.get("duration_ms", 0)
+            elif output_step:
+                step_name = output_step.get("step_name", "")
+                duration = output_step.get("duration_ms", 0)
+            else:
+                continue
+            
+            # Extract call type from step name
+            call_type = "LLM Kõne"
+            if "Query Expansion" in step_name:
+                call_type = f"Päringu laiendamine [{call_id}]"
+            elif "Parallel LLM" in step_name:
+                call_type = f"Paralleelne ekstraktsioon [{call_id}]"
+            
+            lines.append("<details>")
+            lines.append(f"<summary><b>{call_type}</b> ({duration:.0f}ms)</summary>")
+            lines.append("")
+            
+            # Show input
+            if input_step:
+                data_str = input_step.get("data", "")
+                if data_str:
+                    try:
+                        data = json.loads(data_str)
+                        lines.append("**📥 LLM Sisend (täielik prompt):**")
+                        lines.append("")
+                        if isinstance(data, dict):
+                            if "full_prompt" in data:
+                                lines.append("```")
+                                lines.append(data["full_prompt"])
+                                lines.append("```")
+                            elif "full_prompt_text" in data:
+                                lines.append("```")
+                                lines.append(data["full_prompt_text"])
+                                lines.append("```")
+                            elif "messages" in data:
+                                for msg in data["messages"]:
+                                    lines.append(f"**{msg.get('role', 'unknown')}:**")
+                                    lines.append("```")
+                                    lines.append(msg.get("content", ""))
+                                    lines.append("```")
+                                    lines.append("")
+                            elif "system_prompt" in data:
+                                lines.append("**Süsteemi prompt:**")
+                                lines.append("```")
+                                lines.append(data["system_prompt"])
+                                lines.append("```")
+                                lines.append("")
+                                if "query" in data:
+                                    lines.append(f"**Päring:** {data['query']}")
+                                    lines.append("")
+                                if "context" in data or "context_preview" in data:
+                                    ctx = data.get("context") or data.get("context_preview", "")
+                                    lines.append("**Kontekst:**")
+                                    lines.append("```")
+                                    lines.append(ctx)
+                                    lines.append("```")
+                                    lines.append("")
+                        else:
+                            lines.append("```")
+                            lines.append(str(data))
+                            lines.append("```")
+                        lines.append("")
+                    except:
+                        lines.append("```")
+                        lines.append(data_str)
+                        lines.append("```")
+                        lines.append("")
+            
+            # Show output
+            if output_step:
+                data_str = output_step.get("data", "")
+                if data_str:
+                    try:
+                        data = json.loads(data_str)
+                        lines.append("**📤 LLM Väljund (täielik vastus):**")
+                        lines.append("")
+                        if isinstance(data, dict):
+                            raw_response = data.get("raw_response", data.get("response", str(data)))
+                            lines.append("```")
+                            lines.append(raw_response)
+                            lines.append("```")
+                            lines.append("")
+                            if "response_length" in data:
+                                lines.append(f"*Pikkus: {data['response_length']} tähemärki*")
+                                lines.append("")
+                        else:
+                            lines.append("```")
+                            lines.append(str(data))
+                            lines.append("```")
+                            lines.append("")
+                    except:
+                        lines.append("```")
+                        lines.append(data_str)
+                        lines.append("```")
+                        lines.append("")
+            
+            lines.append("</details>")
+            lines.append("")
+    
+    # All pipeline steps (collapsed)
     lines.append("---")
     lines.append("<details>")
-    lines.append("<summary>📋 Toorandmed (JSON)</summary>")
+    lines.append("<summary>📋 Kõik pipeline sammud (täielik)</summary>")
     lines.append("")
     
     for step in steps:
@@ -672,10 +703,11 @@ def _format_debug_output(debug_info: dict) -> str:
         lines.append(f"**Step {step_num}: {step_name}** ({duration:.0f}ms)")
         if data_str:
             lines.append("<details>")
-            lines.append("<summary>Data</summary>")
+            lines.append("<summary>Näita andmeid</summary>")
             lines.append("")
             lines.append("```json")
-            lines.append(data_str[:2000] + ("..." if len(data_str) > 2000 else ""))
+            # Show full data, no truncation
+            lines.append(data_str)
             lines.append("```")
             lines.append("</details>")
         lines.append("")
@@ -687,79 +719,6 @@ def _format_debug_output(debug_info: dict) -> str:
     return "\n".join(lines)
 
 
-
-
-def _extract_chunks_data(steps: list) -> dict:
-    """Extract chunks data from pipeline steps."""
-    import json
-    
-    chunks_by_category = {}
-    
-    for step in steps:
-        name = step.get("step_name", "")
-        data_str = step.get("data", "")
-        
-        if "Per-Category" in name and data_str:
-            try:
-                data = json.loads(data_str)
-                for category, cat_data in data.items():
-                    if isinstance(cat_data, dict) and "chunks" in cat_data:
-                        chunks_by_category[category] = cat_data.get("chunks", [])
-            except:
-                pass
-        
-        # Also handle single-mode search results
-        if "Search Results" in name and data_str:
-            try:
-                data = json.loads(data_str)
-                if "chunks" in data:
-                    chunks_by_category["all"] = data.get("chunks", [])
-            except:
-                pass
-    
-    return chunks_by_category
-
-
-def _extract_extractions_data(steps: list) -> dict:
-    """Extract LLM extraction results from pipeline steps."""
-    import json
-    
-    extractions = {}
-    
-    for step in steps:
-        name = step.get("step_name", "")
-        data_str = step.get("data", "")
-        
-        if "Parallel LLM" in name and data_str:
-            try:
-                data = json.loads(data_str)
-                for ext in data:
-                    if isinstance(ext, dict) and "extraction" in ext:
-                        ext_type = ext.get("extraction")
-                        extractions[ext_type] = {
-                            "items": ext.get("extracted_items", []),
-                            "count": ext.get("items_found", 0),
-                            "duration": ext.get("duration_ms", 0),
-                            "raw": ext.get("raw_response", ""),
-                        }
-            except:
-                pass
-        
-        # Single mode
-        if "JSON Parsed" in name and data_str:
-            try:
-                data = json.loads(data_str)
-                term_entry = data.get("term_entry", {})
-                for cat in ["definitions", "related_terms", "usage_evidence"]:
-                    items = term_entry.get(cat, [])
-                    extractions[cat] = {
-                        "items": items,
-                        "count": len(items),
-                    }
-            except:
-                pass
-    
-    return extractions
 
 
 def llm_view():
@@ -793,27 +752,26 @@ def llm_view():
     async def chat_callback(contents: str, user: str, instance):
         """Handle chat messages by calling the backend API."""
         try:
-            mode = "parallel" if filter_state.parallel_mode else "single"
+            # Always parallel mode now
+            mode = "parallel"
             if filter_state.expand_query:
                 mode += "+per-category-expansion" if filter_state.early_parallelization else "+single-expansion"
             if filter_state.expand_context:
                 mode += "+context"
             if filter_state.use_reranking:
                 mode += "+reranking"
-            logger.info(f"Sending query to backend: {contents} (mode: {mode}, prompt_set: {filter_state.prompt_set_id}, debug: {filter_state.debug_mode}, categories: {filter_state.output_categories})")
+            logger.info(f"Sending query to backend: {contents} (mode: {mode}, debug: {filter_state.debug_mode}, categories: {filter_state.output_categories})")
             result = await backend_client.chat(
                 query=contents,
                 limit=filter_state.limit,
                 files=filter_state.files if filter_state.files else None,
                 only_valid=filter_state.only_valid,
                 debug=filter_state.debug_mode,
-                parallel=filter_state.parallel_mode,
                 expand_query=filter_state.expand_query,
                 expand_context=filter_state.expand_context,
                 use_reranking=filter_state.use_reranking,
                 early_parallelization=filter_state.early_parallelization,
                 output_categories=filter_state.output_categories,
-                prompt_set_id=filter_state.prompt_set_id,
             )
             
             response = result["response"]
@@ -922,8 +880,6 @@ def llm_view():
 
     # Filter panel
     filter_column = pn.Column(
-        pn.pane.HTML("<label>Vali promptide komplekt</label>"),
-        filter_handler.prompt_set_selector,
         pn.pane.HTML("<label>Vali märksõnad</label>"),
         filter_handler.keyword_selector,
         pn.pane.HTML("<label>Vali dokumendid</label>"),
@@ -935,11 +891,6 @@ def llm_view():
         filter_handler.output_categories_selector,
         pn.pane.HTML("<hr style='margin: 10px 0;'>"),
         pn.pane.HTML("<label><b>Arendaja valikud</b></label>"),
-        filter_handler.parallel_checkbox,
-        filter_handler.expand_query_checkbox,
-        filter_handler.early_parallel_checkbox,
-        filter_handler.expand_context_checkbox,
-        filter_handler.reranking_checkbox,
         filter_handler.debug_checkbox,
         pn.Row(
             filter_handler.apply_filters_button,

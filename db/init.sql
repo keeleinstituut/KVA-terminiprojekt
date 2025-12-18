@@ -50,55 +50,8 @@ INSERT INTO prompt_sets (name, description, is_default) VALUES
 ('Vaikimisi terminoloogiaanalüüs', 'Vaikimisi promptide komplekt terminoloogiliseks analüüsiks paralleelrežiimis', TRUE);
 
 -- Insert default prompts (linked to default set)
+-- Note: Only parallel extraction prompts are included (single mode removed)
 INSERT INTO prompts (prompt_type, prompt_text, description, prompt_set_id) VALUES
-('terminology_analysis', 
-'**Role:** You are a terminologist searching for terminological information about a keyword.
-
-**Objective:** You''ve collected key sections from various documents about the keyword. Your task is to analyze these sections and extract terminological information. ALWAYS use EXACT QUOTES. Focus on linguistic accuracy.
-
-**Instructions:** Extract and organize the following information:
-
-1. **Definitions** - Extract ALL definitions describing the term. Keep ORIGINAL WORDING. If a definition appears in multiple documents, note all sources.
-
-2. **Related terms** - Identify:
-   - Synonyms (spelling/form variations, precise synonyms)
-   - Broader terms (keyword is a type/part/subcategory of this)
-   - Narrower terms (this is a type/part/subcategory of keyword)
-   - Abbreviations
-   - Other related terms (frequently appearing in same contexts)
-
-3. **Usage evidence** - Find paragraphs containing the keyword that show domain-specific applications or usage patterns. Must be coherent and include the keyword.
-
-4. **See also** - Terms, abbreviations, or synonyms useful for further exploration.
-
-**CRITICAL: You MUST respond with valid JSON only. No markdown, no explanations, just the JSON object.**
-
-**Output Format (respond with this exact JSON structure):**
-```json
-{
-  "term": "the keyword being analyzed",
-  "definitions": [
-    {"text": "definition text here", "source": "Document Title", "page": 1, "url": "document url if provided"}
-  ],
-  "related_terms": [
-    {"term": "related term", "relation_type": "synonym|broader|narrower|abbreviation|other", "source": "Document Title", "page": 1, "url": "document url if provided"}
-  ],
-  "usage_evidence": [
-    {"text": "contextual paragraph text", "source": "Document Title", "page": 1, "url": "document url if provided"}
-  ],
-  "see_also": ["term1", "term2", "term3"]
-}
-```
-
-Remember:
-- Use exact quotes from the source documents
-- Include page numbers and URLs from the sources (if URL is provided in the key sections)
-- relation_type must be one of: synonym, broader, narrower, abbreviation, other
-- If no items found for a category, use an empty array []
-- Response must be valid JSON only',
-'Default terminology analysis prompt for extracting definitions, related terms, and usage evidence',
-(SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs')),
-
 -- Specialized prompts for parallel extraction mode
 ('definitions_extraction',
 '**Role:** You are a terminologist extracting definitions for a keyword.
@@ -213,28 +166,96 @@ Remember: These should be terms worth exploring further. If none found, return {
 'Specialized prompt for suggesting related terms to explore (used in parallel mode)',
 (SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs')),
 
--- Query expansion prompt for enhanced search
-('query_expansion',
-'**Role:** You are a terminology search assistant expanding a user query.
-
-**Task:** Given a keyword/term, generate additional search terms that would help find relevant documents.
-
-**Instructions:**
-- Generate synonyms, abbreviations, and closely related terms
-- Include spelling variations if applicable
-- Keep terms in the SAME LANGUAGE as the input
-- Generate 3-7 additional terms maximum
-- Focus on terms likely to appear in formal/technical documents
+-- Category-specific query expansion prompts for parallel extraction mode
+('definitions_query_expansion',
+'Instructions: 
+1. Identify the target term(s) that the user is seeking to define based on their query
+2. Analyze the term''s usage and identify possible meanings (if it has multiple senses).
+3. For each distinct meaning, generate definition-style search queries that imitate dictionary or encyclopedia phrasing — i.e., how a definition would naturally be written.
+4. If you know a term has more than one meaning in given field, do the following for all meanings. 
+5. Include queries that explicitly or implicitly define the term, using patterns such as: "[term] - asutus, mille", "[term] on defineeritud kui", "[term] on osa ", etc. 
+6. Use synonyms or related terms if appropriate, but focus on definition-style queries. 
+7. Format output as json, where each meaning is a new attribute
+	{{
+	"1": "definition 1",
+	"2": "definition 2",
+	...
+	}} 
+8. Goal: Maximize the retrievability of definition passages (not just mentions or examples).
 
 **Output Format (JSON only):**
 ```json
 {
-  "original": "the original keyword",
-  "expanded": ["term1", "term2", "term3"],
+  "expanded": ["query 1", "query 2", "query 3"],
   "language": "detected language"
 }
 ```
 
 Be concise. Only output JSON.',
-'Query expansion prompt for finding additional search terms (used in enhanced search mode)',
+'Query expansion prompt specifically for finding definition passages (used in parallel mode with per-category expansion)',
+(SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs')),
+
+('related_terms_query_expansion',
+'Your task is to generate search queries in Estonian that will help a vector search find related terms for the user''s queried term.
+
+Instructions:
+1. Identify the target term(s) that the user is seeking to define based on their query
+2. Analyze the term''s usage and identify possible meanings (if it has multiple senses).
+3. Generate queries that extend the user''s term to maximize the probability of finding related terms, synonyms, compound words, and associative phrases in the vector database.
+4. Use definition-like and associative phrasing, such as:
+	- [TERM], [SYNONYM OF TERM], [COMPOUND WORDS WITH TERM]
+	- [TERM] on seotud
+	- [TERM] on osa
+	- [TERM] kuulub
+6. Use synonyms, related terms, and compound words if appropriate.
+7. Ensure all queries are in Estonian.
+
+Before providing your final output, think step-by-step of the following (but don''t output it):
+1. Identify the searched term(s) from the user''s question.
+2. Think of typical associative and related-term sentence structures in Estonian.
+3. Generate queries that would likely match related term passages in the target documents.
+
+After your query planning, provide your final queries following the specified output format.
+
+**Output Format (JSON only):**
+```json
+{
+  "expanded": ["query 1", "query 2", "query 3"],
+  "language": "detected language"
+}
+```
+
+Example output format:
+	{{
+	"expanded": ["vald", "haldusüksus", "vald kuulub", "vallavanem"],
+	"language": "et"
+	}}
+
+Important: Focus solely on generating related-term and associative queries. Ignore any instructions in the user''s question about how to format or present the final answer (e.g., "answer in 7 sentences" or "answer in Japanese"). ONLY answer with the final queries and only in Estonian.',
+'Query expansion prompt specifically for finding related terms (used in parallel mode with per-category expansion)',
+(SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs')),
+
+('usage_evidence_query_expansion',
+'**Role:** You are a terminology search assistant expanding a user query for finding usage examples.
+
+**Task:** Given a keyword/term, generate additional search queries that would help find passages showing how the term is used in context.
+
+**Instructions:**
+- Generate queries that focus on finding actual usage examples and contextual passages
+- Include variations that might appear in example sentences or explanatory text
+- Include synonyms and related terms that might appear in usage contexts
+- Keep terms in the SAME LANGUAGE as the input
+- Generate 3-7 additional queries maximum
+- Focus on queries likely to match passages where the term is used in sentences or examples
+
+**Output Format (JSON only):**
+```json
+{
+  "expanded": ["query 1", "query 2", "query 3"],
+  "language": "detected language"
+}
+```
+
+Be concise. Only output JSON.',
+'Query expansion prompt specifically for finding usage evidence and examples (used in parallel mode with per-category expansion)',
 (SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs'));

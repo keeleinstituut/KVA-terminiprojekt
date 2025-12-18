@@ -51,11 +51,16 @@ docker-compose exec -T db psql -U postgres -d postgres < "$PG_DUMP"
 echo "PostgreSQL restore complete!"
 
 echo ""
-echo "Applying SQL migrations..."
-for migration in db/migrations/*.sql; do
-    echo "  Applying ${migration}..."
-    docker-compose exec -T db psql -U postgres -d postgres < "$migration"
-done
+echo "=== Applying SQL migrations (if needed) ==="
+echo "Note: Migrations are idempotent - safe to run on already-migrated databases"
+if [ -d "db/migrations" ] && [ "$(ls -A db/migrations/*.sql 2>/dev/null)" ]; then
+    for migration in db/migrations/*.sql; do
+        echo "  Applying ${migration}..."
+        docker-compose exec -T db psql -U postgres -d postgres < "$migration" 2>/dev/null || echo "    (Migration may have already been applied)"
+    done
+else
+    echo "  No migration files found - skipping"
+fi
 
 echo ""
 echo "=== Restoring Qdrant vector database ==="

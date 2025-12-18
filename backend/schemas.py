@@ -100,11 +100,9 @@ class ChatRequest(BaseModel):
     """Request body for chat endpoint."""
     query: str = Field(..., min_length=1, description="User query/keyword")
     filters: Optional[SearchFilters] = None
-    prompt_type: Optional[str] = Field(default="terminology_analysis", description="Type of prompt to use for LLM (ignored in parallel mode)")
     prompt_set_id: Optional[int] = Field(default=None, description="ID of prompt set to use (uses default if not specified)")
     debug: bool = Field(default=False, description="Enable debug mode to see full pipeline details")
-    parallel: bool = Field(default=False, description="Use parallel extraction mode (3 specialized prompts run simultaneously)")
-    expand_query: bool = Field(default=False, description="Expand query per-category with category-specific prompts (definitions, related_terms, usage_evidence). Each category gets its own expansion and search for better results. Default: True in parallel mode.")
+    expand_query: bool = Field(default=True, description="Expand query per-category with category-specific prompts (definitions, related_terms, usage_evidence). Each category gets its own expansion and search for better results.")
     expand_context: bool = Field(default=False, description="Expand retrieved chunks with adjacent paragraphs for fuller context")
     use_reranking: bool = Field(default=True, description="Use cross-encoder reranking to improve search result relevance")
     early_parallelization: bool = Field(default=True, description="Enable early per-category query expansion/search before running parallel extractions")
@@ -257,7 +255,7 @@ class DocumentDeleteResponse(BaseModel):
 
 
 # ============================================================================
-# Prompt Set Models
+# Prompt Models (Simplified - single prompt set)
 # ============================================================================
 
 class PromptSetInfo(BaseModel):
@@ -275,7 +273,6 @@ class PromptInfo(BaseModel):
     id: int
     prompt_type: str
     description: Optional[str] = None
-    prompt_set_id: Optional[int] = None
     date_modified: Optional[str] = None
 
 
@@ -296,28 +293,8 @@ class PromptDetail(BaseModel):
     prompt_type: str
     prompt_text: str
     description: Optional[str] = None
-    prompt_set_id: Optional[int] = None
     date_created: Optional[str] = None
     date_modified: Optional[str] = None
-
-
-class PromptSetCreate(BaseModel):
-    """Request body for creating a new prompt set."""
-    name: str = Field(..., min_length=1, max_length=100, description="Unique prompt set name")
-    description: Optional[str] = Field(None, max_length=500, description="Optional description")
-    is_default: bool = Field(default=False, description="Whether this is the default prompt set")
-
-
-class PromptSetUpdate(BaseModel):
-    """Request body for updating a prompt set."""
-    name: Optional[str] = Field(None, min_length=1, max_length=100, description="New name")
-    description: Optional[str] = Field(None, max_length=500, description="New description")
-    is_default: Optional[bool] = Field(None, description="Whether this is the default prompt set")
-
-
-class PromptSetDuplicate(BaseModel):
-    """Request body for duplicating a prompt set."""
-    new_name: str = Field(..., min_length=1, max_length=100, description="Name for the duplicated set")
 
 
 class PromptUpdate(BaseModel):
@@ -326,18 +303,6 @@ class PromptUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=500, description="Optional description")
 
 
-class PromptCreate(BaseModel):
-    """Request body for creating a new prompt."""
-    prompt_type: str = Field(..., min_length=1, max_length=100, description="Unique prompt type identifier")
-    prompt_text: str = Field(..., min_length=10, max_length=10000, description="The prompt text")
-    description: Optional[str] = Field(None, max_length=500, description="Optional description")
-
-
 class PromptSetsListResponse(BaseModel):
     """Response listing all available prompt sets."""
     prompt_sets: List[PromptSetInfo]
-
-
-class PromptsListResponse(BaseModel):
-    """Response listing all available prompts."""
-    prompts: List[PromptInfo]
