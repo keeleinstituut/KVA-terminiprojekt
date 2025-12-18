@@ -182,7 +182,7 @@ class FilterState:
     """
     def __init__(self):
         self.files: list = []
-        self.limit: int = 8  # Increased from 5 for better term diversity
+        self.limit: int = 15  # Increased from 8 for more results
         self.only_valid: bool = False
         self.debug_mode: bool = False
         self.parallel_mode: bool = True  # Always enabled
@@ -241,9 +241,9 @@ class FilterActionHandler(param.Parameterized):
         self.limit_slider = pn.widgets.EditableIntSlider(
             name="Tekstilõikude arv SKMi sisendis",
             start=1,
-            end=20,
+            end=100,
             step=1,
-            value=8,  # Increased for better term diversity
+            value=15,  # Increased for more results
             width=500,
         )
 
@@ -721,7 +721,7 @@ def _format_debug_output(debug_info: dict) -> str:
 
 
 
-def llm_view():
+def llm_view(guest_mode: bool = False):
     """
     Create the LLM chat view.
     This is now a lightweight frontend that calls the backend API.
@@ -879,7 +879,7 @@ def llm_view():
     )
 
     # Filter panel
-    filter_column = pn.Column(
+    filter_components = [
         pn.pane.HTML("<label>Vali märksõnad</label>"),
         filter_handler.keyword_selector,
         pn.pane.HTML("<label>Vali dokumendid</label>"),
@@ -889,15 +889,23 @@ def llm_view():
         pn.pane.HTML("<hr style='margin: 10px 0;'>"),
         pn.pane.HTML("<label><b>Päringu kategooriad</b></label>"),
         filter_handler.output_categories_selector,
-        pn.pane.HTML("<hr style='margin: 10px 0;'>"),
-        pn.pane.HTML("<label><b>Arendaja valikud</b></label>"),
-        filter_handler.debug_checkbox,
+    ]
+
+    if not guest_mode:
+        filter_components.extend([
+            pn.pane.HTML("<hr style='margin: 10px 0;'>"),
+            pn.pane.HTML("<label><b>Arendaja valikud</b></label>"),
+            filter_handler.debug_checkbox,
+        ])
+
+    filter_components.append(
         pn.Row(
             filter_handler.apply_filters_button,
             filter_handler.refresh_choices_button,
-        ),
-        visible=True,
+        )
     )
+
+    filter_column = pn.Column(*filter_components, visible=True)
 
     layout = pn.Row(ci, pn.Column(toggle, filter_column))
     # See Also buttons are now created natively in footer_objects of ChatMessage

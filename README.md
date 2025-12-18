@@ -1,60 +1,81 @@
 # KVA-terminiprojekt
 
-### Kogu rakenduse üles seadmine *docker-compose*'iga
+## Seadistamine
 
-Täida **.env** fail.
+Täida fail `.env` (vt `.env.example`).
 
-Konfigureerida **docker-compose.yml** failis: 
-* Postgre andmete asukoht: `{pg_andmestike_failitee}:/var/lib/postgresql/data`
+Määra failis `docker-compose.yml`:
+```yaml
+volumes:
+  - {pg_andmed}:/var/lib/postgresql/data
+  - {qdrant_andmed}:/qdrant/storage
+  - {credentials.json}:/app/config/credentials.json
+```
 
-* Qdranti andmete asukoht: `{qdranti_andmestike_failitee}:/qdrant/storage`
-
-* Autentimiseks kasutajainfo asukoht: `{credentials_fail/credentials.json}:/app/config/credentials.json`, näiteks paroolita kasutajakonto jaoks:
-*{"kulaline": ""}*
-
-~~~
+Käivitamine:
+```
 docker compose up
-~~~
+```
 
-#### Kui on vaja muuta konfiguratsiooni:
-Muuta vajadusel konfiguratsiooni **/config/config.json** -- viimasel juhul tuleb teha ka kva-terminiprojekti image build, nt docker compose failis   
-~~~
- terms:
-    build: ./
-~~~
+Autentimiseks loo `credentials.json`. Süsteem toetab kahte rolli:
+- `kylaline`: Piiratud ligipääs (ainult otsing)
+- `admin` (või muu kasutaja): Täisligipääs (otsing, failide haldus, debug)
 
+Näide:
+```json
+{"kylaline": "", "admin": "parool123"}
+```
 
-### Rakenduse osade üles seadmine:
+## Pipeline
 
-1) Andmebaaside üles seadmine
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  SISEND: termin (nt "eririietus")                                       │
+└─────────────────────┬───────────────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PÄRINGU LAIENDAMINE (LLM)                                              │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐            │
+│  │ definitsioonid  │ │ seotud terminid │ │ kasutuskontekst │            │
+│  │ → "eririietus   │ │ → "spetsiaalne  │ │ → "eririietus   │            │
+│  │    on ..."      │ │    riietus"     │ │    kasutamine"  │            │
+│  └────────┬────────┘ └────────┬────────┘ └────────┬────────┘            │
+└───────────┼───────────────────┼───────────────────┼─────────────────────┘
+            │                   │                   │
+            ▼                   ▼                   ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  HÜBRIIDOTSING (Qdrant)                                                 │
+│  dense (e5-large) + sparse (BM25) → lõigud dokumendist                  │
+└─────────────────────┬───────────────────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  PARALLEELNE LLM PÄRING                                                 │
+│  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐            │
+│  │ definitsioonid  │ │ seotud terminid │ │ kasutuskontekst │            │
+│  │ ← lõigud A      │ │ ← lõigud B      │ │ ← lõigud C      │            │
+│  └────────┬────────┘ └────────┬────────┘ └────────┬────────┘            │
+└───────────┼───────────────────┼───────────────────┼─────────────────────┘
+            │                   │                   │
+            └───────────────────┼───────────────────┘
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  VÄLJUND: struktureeritud terminoloogiakirje                            │
+│  - definitsioonid (puudusid antud näites)                               │
+│  - seotud terminid (kombinesoon, jope, tunked - Politseiametniku... )   │
+│  - kasutuskontekstid ("Mootorratturi eririietus..." - Politseiametni...)│
+│  - vaata ka (vormiriietus, eraldusmärgid)                               │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-Eemaldada docker-compose failist `terms` sektsioon.
+## Konfiguratsioon
 
-Konfigureerida **docker-compose.yml** failis: 
-* Postgre andmete asukoht: `{pg_andmestike_failitee}:/var/lib/postgresql/data`
-
-* Qdranti andmete asukoht: `{qdranti_andmestike_failitee}:/qdrant/storage`
- 
-~~~
-docker compose up
-~~~
-
-2) Kasutajaliidese üles seadmine
-
-Täida .env fail.
-Muuta vajadusel konfiguratsiooni **/config/config.json**
-
-~~~
-docker build --progress=plain -t kva-ui .
-docker run --env-file .env --name kva-ui -v {credentials_fail/credentials.json}:/app/config/credentials.json -p 5006:5006 -it kva-ui
-~~~
-
-
-### Mudelid
-
-Rakendust saab kasutada OpenAI ja Anthropicu Claude'i mudelitega. Mudeli vahetamiseks vahetada mudeli nimi failis **config.json**:
-    ```
- "llm": {
-        "model": "gpt-4o"
-    },
-    ```
+Mudeli muutmine failis `config/config.json`:
+```json
+{
+  "llm": {"model": "gpt-4o"},
+  "hybrid_search": {"enabled": true},
+  "reranking": {"enabled": false}
+}
+```

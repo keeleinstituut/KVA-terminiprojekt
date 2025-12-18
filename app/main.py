@@ -13,8 +13,8 @@ def create_file_upload_area():
     return pn.Column(file_upload())
 
 
-def create_chat_view_area():
-    return pn.Column(llm_view())
+def create_chat_view_area(guest_mode: bool = False):
+    return pn.Column(llm_view(guest_mode=guest_mode))
 
 
 def create_prompt_view_area():
@@ -27,7 +27,7 @@ def create_document_management_area():
 
 # Create the template and structure for the UI
 def create_template(guest_mode=False):
-    chat_view_area = create_chat_view_area()
+    chat_view_area = create_chat_view_area(guest_mode=guest_mode)
 
     tabs = pn.Tabs(
         ("Dokumendiotsing", chat_view_area),
@@ -48,6 +48,22 @@ def create_template(guest_mode=False):
         main=[tabs],
         sidebar_width=300,
     )
+
+    # Add logout button to the header (less prominent)
+    logout_btn = pn.widgets.Button(
+        name="Logi välja", 
+        button_type="default", 
+        width=90, 
+        align="center",
+        margin=(5, 10, 5, 0)
+    )
+    logout_btn.js_on_click(code="window.location.href = '/logout'")
+    
+    # Use spacer to push logout button to the right
+    spacer = pn.Spacer(sizing_mode='stretch_width')
+    
+    template.header.append(spacer)
+    template.header.append(logout_btn)
 
     return template
 

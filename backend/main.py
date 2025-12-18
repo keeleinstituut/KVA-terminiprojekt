@@ -184,7 +184,7 @@ async def search(
         filters = request.filters or {}
         results = service.search(
             query=request.query,
-            limit=filters.limit if hasattr(filters, 'limit') else 5,
+            limit=filters.limit if hasattr(filters, 'limit') else 10,
             files=filters.files if hasattr(filters, 'files') else None,
             only_valid=filters.only_valid if hasattr(filters, 'only_valid') else False,
         )
@@ -218,7 +218,7 @@ async def chat(
     """
     try:
         filters = request.filters or {}
-        limit = filters.limit if hasattr(filters, 'limit') else 5
+        limit = filters.limit if hasattr(filters, 'limit') else 10
         files = filters.files if hasattr(filters, 'files') else None
         only_valid = filters.only_valid if hasattr(filters, 'only_valid') else False
         

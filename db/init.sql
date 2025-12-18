@@ -114,10 +114,10 @@ Remember:
 ('usage_evidence_extraction',
 '**Role:** You are a terminologist finding usage examples for a keyword.
 
-**Task:** Find passages that demonstrate how the keyword is used in context. Make them readable and concise.
+**Task:** Find ALL passages that demonstrate how the keyword is used in context. Make them readable and concise.
 
 **Instructions:**
-- Find 2-4 passages that show the keyword in domain-specific usage
+- Extract every relevant passage found in the provided sections
 - For each passage, you may provide a brief context/intro explaining why this example is relevant
 - The actual quote (text field) must be EXACT from the source - this is critical for citation linking
 - Keep quotes concise: extract the most relevant 1-2 sentences, not entire paragraphs
@@ -146,10 +146,10 @@ CRITICAL: The "text" field must contain the EXACT wording from the document - no
 ('see_also_extraction',
 '**Role:** You are a terminology exploration assistant.
 
-**Task:** Based on the keyword and document sections, suggest terms that would be valuable to explore next.
+**Task:** Based on the keyword and document sections, suggest as many terms as are relevant to explore next.
 
 **Instructions:**
-- Suggest 3-7 terms that are closely related to the keyword
+- Suggest at least 5-10 terms that are related to the keyword
 - Include terms that appear frequently in the context
 - Include broader concepts, narrower specializations, and related fields
 - Focus on terms that would help a terminologist understand the domain better
@@ -158,7 +158,7 @@ CRITICAL: The "text" field must contain the EXACT wording from the document - no
 **Output Format (JSON only):**
 ```json
 {
-  "see_also": ["term1", "term2", "term3", "term4", "term5"]
+  "see_also": ["term1", "term2", "term3", "term4", "term5", "..."]
 }
 ```
 
@@ -245,7 +245,7 @@ Important: Focus solely on generating related-term and associative queries. Igno
 - Include variations that might appear in example sentences or explanatory text
 - Include synonyms and related terms that might appear in usage contexts
 - Keep terms in the SAME LANGUAGE as the input
-- Generate 3-7 additional queries maximum
+- Generate up to 10 additional queries
 - Focus on queries likely to match passages where the term is used in sentences or examples
 
 **Output Format (JSON only):**

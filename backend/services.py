@@ -790,63 +790,7 @@ class ChatService:
             context += f'\n{result["text"]}\n'
             context += "*" * 15 + "\n"
         return context
-    
-    def _parse_llm_json(self, content: str, query: str) -> Dict[str, Any]:
-        """
-        Parse JSON from LLM response, handling potential formatting issues.
-        
-        Args:
-            content: Raw LLM response content
-            query: Original query (used as fallback term)
-            
-        Returns:
-            Parsed term entry dictionary
-        """
-        import re
-        
-        logger.debug(f"Raw LLM response: {content[:500]}...")
-        
-        json_str = None
-        
-        # Try to extract JSON from markdown code blocks (greedy match)
-        json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*\})\s*```', content)
-        if json_match:
-            json_str = json_match.group(1)
-            logger.debug("Extracted JSON from code block")
-        else:
-            # Try to find raw JSON object in the content
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                json_str = json_match.group(0)
-                logger.debug("Extracted raw JSON object")
-            else:
-                logger.warning("No JSON object found in LLM response")
-                json_str = content.strip()
-        
-        try:
-            parsed = json.loads(json_str)
-            logger.info("Successfully parsed LLM JSON response")
-            
-            # Ensure required fields exist with defaults
-            return {
-                "term": parsed.get("term", query),
-                "definitions": parsed.get("definitions", []),
-                "related_terms": parsed.get("related_terms", []),
-                "usage_evidence": parsed.get("usage_evidence", []),
-                "see_also": parsed.get("see_also", []),
-            }
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse LLM JSON response: {e}")
-            logger.warning(f"Attempted to parse: {json_str[:200] if json_str else 'None'}...")
-            # Return empty structure on parse failure
-            return {
-                "term": query,
-                "definitions": [],
-                "related_terms": [],
-                "usage_evidence": [],
-                "see_also": [],
-            }
-    
+
     def _create_text_fragment_url(self, url: str, text: str) -> str:
         """
         Create a URL with text fragment for highlighting.
@@ -896,18 +840,26 @@ class ChatService:
     
     def _is_low_confidence(self, confidence: str) -> bool:
         """Check if confidence level is low (inferred or expanded)."""
-        return confidence in ("inferred", "expanded")
+        return confidence in ("inferred", "expanded") or confidence.startswith("expanded:")
     
     def _get_confidence_label(self, confidence: str, language: str = "et") -> str:
         """Get human-readable label for confidence level (only for low confidence)."""
+        # Check for expanded:{term} format
+        if confidence.startswith("expanded:"):
+            term = confidence.split(":", 1)[1]
+            if language == "et":
+                return f"laiendatud otsing: {term}"
+            else:
+                return f"expanded search: {term}"
+
         if language == "et":
             labels = {
-                "inferred": "tuletatud kontekstist",
+                "inferred": "kaudne seos",  # Clearer than "tuletatud kontekstist"
                 "expanded": "laiendatud otsing",
             }
         else:
             labels = {
-                "inferred": "inferred from context",
+                "inferred": "indirect relation",
                 "expanded": "from expanded search",
             }
         return labels.get(confidence, "")
@@ -962,6 +914,7 @@ class ChatService:
         kept = []
         for defn in defs_sorted:
             text = defn.get("text", "").strip()
+            source = defn.get("source", "").strip().lower()
             if not text:
                 continue
                 
@@ -969,26 +922,32 @@ class ChatService:
             
             for kept_defn in kept:
                 kept_text = kept_defn.get("text", "").strip()
+                kept_source = kept_defn.get("source", "").strip().lower()
                 
-                # Case 1: This text is fully contained in a longer definition
-                if self._is_contained_in(text, kept_text):
-                    is_duplicate = True
-                    logger.debug(f"Removing definition (substring): '{text[:50]}...' contained in '{kept_text[:50]}...'")
-                    break
-                
-                # Case 2: Very high word overlap (>85%) - likely same definition with minor differences
-                similarity = self._text_similarity(text, kept_text)
-                if similarity > 0.85:
-                    is_duplicate = True
-                    logger.debug(f"Removing definition (similar {similarity:.0%}): '{text[:50]}...'")
-                    break
+                # If they are from the SAME source, be aggressive with deduplication
+                if source == kept_source:
+                    # Case 1: This text is fully contained in a longer definition from same source
+                    if self._is_contained_in(text, kept_text):
+                        is_duplicate = True
+                        logger.debug(f"Removing definition (substring from same source): '{text[:50]}...'")
+                        break
+                    
+                    # Case 2: Very high word overlap (>85%) from same source
+                    similarity = self._text_similarity(text, kept_text)
+                    if similarity > 0.85:
+                        is_duplicate = True
+                        logger.debug(f"Removing definition (similar from same source {similarity:.0%}): '{text[:50]}...'")
+                        break
+                else:
+                    # From DIFFERENT sources - keep them!
+                    pass
             
             if not is_duplicate:
                 kept.append(defn)
         
         logger.info(f"Definitions: {len(definitions)} → {len(kept)} after deduplication")
         return kept
-    
+
     def _deduplicate_related_terms(self, related_terms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Deduplicate related terms by term name (case-insensitive).
@@ -1000,7 +959,10 @@ class ChatService:
         # Group by normalized term name
         by_term = defaultdict(list)
         for rt in related_terms:
-            term_key = rt.get("term", "").strip().lower()
+            term_name = rt.get("term", "").strip()
+            if not term_name:
+                continue
+            term_key = term_name.lower()
             by_term[term_key].append(rt)
         
         deduplicated = []
@@ -1008,19 +970,26 @@ class ChatService:
         
         for term_key, terms in by_term.items():
             # Sort by confidence (direct > strong > inferred > expanded)
-            terms_sorted = sorted(terms, key=lambda x: confidence_order.get(x.get("confidence", "direct"), 99))
+            # Then by text length to get the most descriptive version
+            terms_sorted = sorted(
+                terms, 
+                key=lambda x: (
+                    confidence_order.get(x.get("confidence", "direct"), 99),
+                    -len(str(x.get("relation_type", "")))
+                )
+            )
             # Keep the best one
             deduplicated.append(terms_sorted[0])
         
         logger.info(f"Related terms: {len(related_terms)} → {len(deduplicated)} after deduplication")
         return deduplicated
-    
+
     def _deduplicate_usage_evidence(self, usage_evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Deduplicate usage evidence:
-        - Remove entries where the quoted text is fully contained in another
-        - Keep longer/more complete quotes
-        - Merge very similar quotes (>85% word overlap)
+        - Keep examples from different sources (provides more variety)
+        - Remove entries where the quoted text is fully contained in another from same source
+        - Merge very similar quotes (>85% word overlap) from same source
         """
         if not usage_evidence:
             return usage_evidence
@@ -1031,23 +1000,33 @@ class ChatService:
         kept = []
         for evidence in sorted_evidence:
             text = evidence.get("text", "").strip()
+            source = evidence.get("source", "").strip().lower()
             if not text:
                 continue
                 
             is_duplicate = False
             for kept_ev in kept:
                 kept_text = kept_ev.get("text", "").strip()
+                kept_source = kept_ev.get("source", "").strip().lower()
                 
-                # Case 1: This quote is fully contained in a longer quote
-                if self._is_contained_in(text, kept_text):
-                    is_duplicate = True
-                    break
-                
-                # Case 2: Very high word overlap - likely same quote
-                similarity = self._text_similarity(text, kept_text)
-                if similarity > 0.85:
-                    is_duplicate = True
-                    break
+                # Only deduplicate if from same source
+                if source == kept_source:
+                    # Case 1: This quote is fully contained in a longer quote from same source
+                    if self._is_contained_in(text, kept_text):
+                        is_duplicate = True
+                        logger.debug(f"Removing usage example (substring from same source): '{text[:50]}...'")
+                        break
+                    
+                    # Case 2: Very high word overlap from same source
+                    similarity = self._text_similarity(text, kept_text)
+                    if similarity > 0.85:
+                        is_duplicate = True
+                        logger.debug(f"Removing usage example (similar from same source {similarity:.0%}): '{text[:50]}...'")
+                        break
+                else:
+                    # Different sources - keep them! 
+                    # Use case: Showing that the same definition/usage appears in multiple regulations is valuable.
+                    pass
             
             if not is_duplicate:
                 kept.append(evidence)
@@ -1055,6 +1034,49 @@ class ChatService:
         logger.info(f"Usage evidence: {len(usage_evidence)} → {len(kept)} after deduplication")
         return kept
     
+    def _update_confidence_based_on_provenance(self, term_entry: Dict[str, Any], category_results_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+        """
+        Update confidence levels based on whether results came from expanded search.
+        Links extracted items to their source search terms.
+        """
+        for category in ["definitions", "related_terms", "usage_evidence"]:
+            items = term_entry.get(category, [])
+            chunks = category_results_dict.get(category, [])
+            
+            # Create a lookup for chunks: (title, page) -> _source
+            # Handle page as int or str to ensure matching
+            chunk_sources = {}
+            for chunk in chunks:
+                title = chunk.get("title", "").strip()
+                page = chunk.get("page_number", 0)
+                source = chunk.get("_source", "original")
+                if source.startswith("expanded:"):
+                    # Store multiple versions of keys to be robust
+                    chunk_sources[(title, str(page))] = source
+                    chunk_sources[(title, int(page) if str(page).isdigit() else 0)] = source
+            
+            if not chunk_sources:
+                continue
+                
+            for item in items:
+                source = item.get("source", "").strip()
+                page = item.get("page", 0)
+                
+                # Check if this item came from an expanded chunk
+                provenance = chunk_sources.get((source, page))
+                
+                # If matched and confidence isn't already set to something specific (or is direct/strong/inferred)
+                # Actually, we overwrite 'direct'/'strong' if it comes from expansion because 
+                # user specifically requested to know if it's from "expanded search".
+                # However, if it's "inferred", maybe we should keep "inferred"? 
+                # Decision: "expanded:foo" is a provenance type, it explains HOW it was found.
+                # If the LLM thinks it's a direct definition, but we found it via synonym, 
+                # it's still useful to know it came via synonym.
+                if provenance:
+                     item["confidence"] = provenance
+        
+        return term_entry
+
     def _deduplicate_term_entry(self, term_entry: Dict[str, Any]) -> Dict[str, Any]:
         """
         Deduplicate all components of a term entry.
@@ -1126,10 +1148,7 @@ class ChatService:
             warning = "Enamik tulemusi on tuletatud kontekstist. Kontrolli allikaid."
         
         # Add expanded query info (not a warning, just info)
-        if expanded_query_used and not warning:
-            warning = "Kasutati laiendatud otsingut (sünonüümid/seotud terminid)."
-        elif expanded_query_used and warning:
-            warning = warning + " Kasutati laiendatud otsingut."
+        # User feedback: "Kasutati laiendatud otsingut..." is useless, so we skip adding it to warning.
         
         return {
             "overall_confidence": overall,
@@ -1172,6 +1191,17 @@ class ChatService:
         lines.append(f"**{term_entry['term']}**")
         lines.append("")
         
+        # Check if we have any results at all
+        has_results = (
+            term_entry.get("definitions") or 
+            term_entry.get("related_terms") or 
+            term_entry.get("usage_evidence")
+        )
+        
+        if not has_results:
+            lines.append("*(Terminit ei leitud dokumentidest)*")
+            return "\n".join(lines)
+        
         # Match quality warning (if present) - without emojis
         match_quality = term_entry.get("match_quality", {})
         if match_quality and match_quality.get("warning_message"):
@@ -1179,20 +1209,26 @@ class ChatService:
             lines.append("")
         
         # Definitions
-        if "definitions" in output_categories and term_entry["definitions"]:
-            lines.append("**Definitsioonid:**")
-            for i, defn in enumerate(term_entry["definitions"], 1):
-                text = defn.get('text', '')
-                confidence = defn.get('confidence', 'direct')
-                source_link = self._format_source_link(defn, text)
-                
-                # Only show indicator for low-confidence items
-                if show_confidence and self._is_low_confidence(confidence):
-                    label = self._get_confidence_label(confidence)
-                    lines.append(f"  {i}. {text} {source_link} — *{label}*")
-                else:
-                    lines.append(f"  {i}. {text} {source_link}")
-            lines.append("")
+        if "definitions" in output_categories:
+            if term_entry["definitions"]:
+                lines.append("**Definitsioonid:**")
+                for i, defn in enumerate(term_entry["definitions"], 1):
+                    text = defn.get('text', '')
+                    confidence = defn.get('confidence', 'direct')
+                    source_link = self._format_source_link(defn, text)
+                    
+                    # Only show indicator for low-confidence items
+                    if show_confidence and self._is_low_confidence(confidence):
+                        label = self._get_confidence_label(confidence)
+                        lines.append(f"  {i}. {text} {source_link} — *{label}*")
+                    else:
+                        lines.append(f"  {i}. {text} {source_link}")
+                lines.append("")
+            # If we have other results but no definitions, explicitly state it
+            elif term_entry.get("related_terms") or term_entry.get("usage_evidence"):
+                lines.append("**Definitsioonid:**")
+                lines.append("*(Otseseid definitsioone ei leitud, vaata seotud termineid ja näiteid)*")
+                lines.append("")
         
         # Related terms
         if "related_terms" in output_categories and term_entry["related_terms"]:
@@ -1227,7 +1263,8 @@ class ChatService:
                 
                 # Format: optional context, then exact quote in italics
                 if context:
-                    lines.append(f"  {i}. {context} — *\"{text}\"* {source_link}{label_suffix}")
+                    lines.append(f"  {i}. {context}")
+                    lines.append(f"     — *\"{text}\"* {source_link}{label_suffix}")
                 else:
                     lines.append(f"  {i}. *\"{text}\"* {source_link}{label_suffix}")
             lines.append("")
@@ -1423,11 +1460,11 @@ class ChatService:
                 seen_in_original.add(key)
             
             # Search each expanded term (limit searches to avoid slowdown)
-            for term in expanded_terms[:3]:  # Max 3 expanded terms
+            for term in expanded_terms[:5]:  # Max 5 expanded terms
                 try:
                     extra = self.search_service.search(
                         query=term,
-                        limit=3,  # Small limit per term
+                        limit=5,  # Limit per term
                         files=files,
                         only_valid=only_valid,
                         use_reranking=False,  # Don't rerank yet
@@ -1453,8 +1490,8 @@ class ChatService:
             logger.info(f"Reranking {len(combined)} combined results (once at end)")
             combined = self.search_service._rerank(query, combined, top_k=None)
         
-        # Limit total to reasonable size (1.5x original limit)
-        max_total = int(limit * 1.5)
+        # Limit total to reasonable size (2x original limit)
+        max_total = int(limit * 2.0)
         return combined[:max_total]
 
     # =========================================================================
@@ -1557,18 +1594,57 @@ class ChatService:
         import re
         
         # Try to extract JSON from markdown code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*\})\s*```', content)
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', content)
         if json_match:
             json_str = json_match.group(1)
         else:
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                json_str = json_match.group(0)
+            # Try to find JSON object OR list
+            # We look for the first occurrence of { or [ to determine type
+            match = re.search(r'[\{\[]', content)
+            if match:
+                first_char = match.group(0)
+                if first_char == '{':
+                    # Expecting object
+                    m = re.search(r'\{[\s\S]*\}', content)
+                    json_str = m.group(0) if m else ""
+                else:
+                    # Expecting list
+                    m = re.search(r'\[[\s\S]*\]', content)
+                    json_str = m.group(0) if m else ""
             else:
                 return {}
         
         try:
-            return json.loads(json_str)
+            parsed = json.loads(json_str)
+            
+            # Robustness: if LLM returned a list directly instead of an object with a key
+            if isinstance(parsed, list):
+                return {extraction_type: parsed}
+                
+            # Robustness: if LLM used a slightly different key (hallucination)
+            # e.g., "definitions_list" instead of "definitions"
+            if extraction_type not in parsed:
+                # Common variations
+                variations = {
+                    "definitions": ["definitions", "definition_list", "extracted_definitions", "defs"],
+                    "related_terms": ["related_terms", "related", "synonyms", "terms"],
+                    "usage_evidence": ["usage_evidence", "examples", "usage_examples", "context", "evidence"],
+                    "see_also": ["see_also", "suggestions", "related_explorations", "explore_more"]
+                }
+                
+                target_vars = variations.get(extraction_type, [extraction_type])
+                for var in target_vars:
+                    if var in parsed:
+                        parsed[extraction_type] = parsed[var]
+                        break
+                else:
+                    # If still not found, try to find any list in the object and assume it's the results
+                    for key, value in parsed.items():
+                        if isinstance(value, list) and len(value) > 0:
+                            parsed[extraction_type] = value
+                            break
+                            
+            return parsed
         except json.JSONDecodeError:
             logger.warning(f"Failed to parse {extraction_type} JSON")
             return {}
@@ -1876,6 +1952,9 @@ class ChatService:
                 term_entry["usage_evidence"] = parsed.get("usage_evidence", [])
             elif ext_type == "see_also":
                 term_entry["see_also"] = parsed.get("see_also", [])
+        
+        # Link results to their provenance (expanded search terms)
+        term_entry = self._update_confidence_based_on_provenance(term_entry, category_results_dict)
         
         # Deduplicate results (remove near-duplicate definitions, terms, evidence)
         term_entry = self._deduplicate_term_entry(term_entry)
