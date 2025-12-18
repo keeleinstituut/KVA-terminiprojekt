@@ -1897,7 +1897,7 @@ class ChatService:
                         "duration_ms": round(duration, 1),
                         "items_found": len(items) if isinstance(items, list) else 0,
                         "chunks_available": len(available_chunks),
-                        "extracted_items": items[:10] if isinstance(items, list) and len(items) > 0 else [],  # Show first 10 items
+                        "extracted_items": items if isinstance(items, list) else [],  # Show all items in debug
                         "raw_response": raw[:500] + "..." if len(str(raw)) > 500 else raw,
                     }
                     
@@ -1921,7 +1921,7 @@ class ChatService:
                 "Parallel LLM Extractions",
                 f"Ran {len(prompts_loaded)} specialized prompts in parallel",
                 parallel_info,
-                truncate_at=20000  # Allow more data for extraction details
+                truncate_at=None  # Show all extraction details without truncation
             )
         
         # Step 6: Combine results
