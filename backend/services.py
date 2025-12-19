@@ -699,9 +699,9 @@ class SearchService:
         if not results or not self.reranking_enabled or not self.reranker:
             return results
         
-        # Get top_k from config if not specified
+        # If top_k not specified, return all results (let caller decide limit)
         if top_k is None:
-            top_k = self.config.get("reranking", {}).get("top_k", len(results))
+            top_k = len(results)
         
         logger.info(f"Reranking {len(results)} results for query: {query[:50]}...")
         
@@ -1424,51 +1424,71 @@ class ChatService:
         files: List[str] = None,
         only_valid: bool = False,
         use_reranking: bool = True,
+        category: str = None,
+        debug_collector: 'DebugCollector' = None,
     ) -> List[Dict[str, Any]]:
         """
         Search with original query and expanded terms, then deduplicate.
-        Reranking is done ONCE at the end on combined results for performance.
         
-        IMPORTANT: Original query results are ALWAYS kept first.
-        Expanded results only ADD to (not replace) original results.
+        Strategy: Fetch MORE results than needed, then rerank/sort and keep only the best.
+        - Fetch limit (original search): limit × 2
+        - Fetch limit (per expanded term): limit
+        - Final limit (after reranking/sorting): limit
         
-        Returns:
-            Combined results: all original + additional expanded (up to limit*2)
+        This ensures we have enough material to find the best results.
         """
-        # Step 1: Search with original query WITHOUT reranking (we'll rerank at the end)
-        original_results = self.search_service.search(
+        fetch_limit = limit * 2  # Fetch more than we need
+        
+        # Step 1: Search with original query (fetch more)
+        # Use debug mode to get raw Qdrant results
+        search_result = self.search_service.search(
             query=query,
-            limit=limit,
+            limit=fetch_limit,
             files=files,
             only_valid=only_valid,
             use_reranking=False,  # Don't rerank yet
+            debug=debug_collector is not None,
         )
+        
+        if debug_collector is not None:
+            original_results, original_search_debug = search_result
+        else:
+            original_results = search_result
+            original_search_debug = None
         
         # Mark original results
         for r in original_results:
             r["_source"] = "original"
         
-        logger.info(f"Original search found {len(original_results)} results")
+        logger.info(f"[{category or 'search'}] Original search found {len(original_results)} results (fetch_limit={fetch_limit})")
         
-        # Step 2: Search with each expanded term individually for additional results
+        # Step 2: Search with each expanded term individually
         expanded_results = []
+        expanded_search_debugs = []  # Collect debug info for each expanded term
         if expanded_terms:
             seen_in_original = set()
             for r in original_results:
-                # Use title + page as unique key to avoid same chunk
                 key = (r.get("title", ""), r.get("page_number", 0), r.get("text", "")[:50])
                 seen_in_original.add(key)
             
-            # Search each expanded term (limit searches to avoid slowdown)
+            # Search each expanded term
             for term in expanded_terms[:5]:  # Max 5 expanded terms
                 try:
-                    extra = self.search_service.search(
+                    search_result = self.search_service.search(
                         query=term,
-                        limit=5,  # Limit per term
+                        limit=limit,  # Use same limit per term
                         files=files,
                         only_valid=only_valid,
-                        use_reranking=False,  # Don't rerank yet
+                        use_reranking=False,
+                        debug=debug_collector is not None,
                     )
+                    
+                    if debug_collector is not None:
+                        extra, term_debug = search_result
+                        expanded_search_debugs.append({"term": term, "debug": term_debug})
+                    else:
+                        extra = search_result
+                    
                     for r in extra:
                         key = (r.get("title", ""), r.get("page_number", 0), r.get("text", "")[:50])
                         if key not in seen_in_original:
@@ -1478,21 +1498,70 @@ class ChatService:
                 except Exception as e:
                     logger.warning(f"Expanded search for '{term}' failed: {e}")
             
-            logger.info(f"Expanded search found {len(expanded_results)} additional results")
+            logger.info(f"[{category or 'search'}] Expanded search found {len(expanded_results)} additional results")
         
         # Step 3: Combine all results
         combined = original_results.copy()
         combined.extend(expanded_results)
         
-        # Step 4: Rerank ONCE on combined results using the ORIGINAL query
-        # This ensures we rank by relevance to what the user actually asked for
+        # Step 4: Rerank or sort by score
+        mode_used = "none"
         if use_reranking and self.search_service.reranking_enabled and len(combined) > 0:
-            logger.info(f"Reranking {len(combined)} combined results (once at end)")
+            logger.info(f"[{category or 'search'}] Reranking {len(combined)} combined results")
             combined = self.search_service._rerank(query, combined, top_k=None)
+            mode_used = "reranking"
+        else:
+            # Sort by hybrid search score (descending)
+            combined.sort(key=lambda x: x.get("score", 0), reverse=True)
+            logger.info(f"[{category or 'search'}] Sorted {len(combined)} combined results by score")
+            mode_used = "score_sort"
         
-        # Limit total to reasonable size (2x original limit)
-        max_total = int(limit * 2.0)
-        return combined[:max_total]
+        # Step 5: Keep only the best results (final limit)
+        final_results = combined[:limit]
+        logger.info(f"[{category or 'search'}] Returning top {len(final_results)} results from {len(combined)} candidates")
+        
+        # Report to debug collector if provided
+        if debug_collector and category:
+            # Add raw Qdrant search debug info
+            qdrant_debug = {
+                "original_search": original_search_debug,
+                "expanded_searches": expanded_search_debugs if expanded_search_debugs else None,
+            }
+            
+            debug_collector.add_step(
+                f"Qdrant Searches [{category}]",
+                f"Raw Qdrant search results for original query and {len(expanded_search_debugs)} expanded terms",
+                qdrant_debug
+            )
+            
+            debug_collector.add_step(
+                f"Search & Reranking [{category}]",
+                f"Fetched {len(original_results)} original and {len(expanded_results)} expanded results, then applied {mode_used}",
+                {
+                    "category": category,
+                    "original_query": query,
+                    "expanded_terms": expanded_terms,
+                    "original_results_count": len(original_results),
+                    "expanded_results_count": len(expanded_results),
+                    "combined_count": len(combined),
+                    "mode_used": mode_used,
+                    "final_limit": limit,
+                    "final_results_count": len(final_results),
+                    "top_results": [
+                        {
+                            "rank": i+1,
+                            "title": r.get("title", ""),
+                            "page": r.get("page_number", 0),
+                            "score": round(r.get("score", 0), 4),
+                            "source": r.get("_source", "unknown"),
+                            "text": r.get("text", "")
+                        }
+                        for i, r in enumerate(final_results)
+                    ]
+                }
+            )
+            
+        return final_results
 
     # =========================================================================
     # Parallel extraction methods
@@ -1706,8 +1775,27 @@ class ChatService:
             mode_str += "+reranking"
         logger.info(f"🚀 Starting {mode_str.upper()} extraction for: {query}")
         
-        # Step 1: Query received (not logged - query is visible in debug header)
-        # Step 2: Filters applied (not logged - not useful debug info)
+        # Step 1: Query received
+        if debug_collector:
+            debug_collector.add_step(
+                "Query Received",
+                f"Received query: {query}",
+                {"query": query}
+            )
+        
+        # Step 2: Filters applied
+        if debug_collector:
+            debug_collector.add_step(
+                "Filters Applied",
+                "Applied search filters",
+                {
+                    "limit": limit,
+                    "files": files,
+                    "only_valid": only_valid,
+                    "expand_query": expand_query,
+                    "use_reranking": use_reranking,
+                }
+            )
         
         # Default to all categories if none specified
         if not output_categories:
@@ -1751,7 +1839,8 @@ class ChatService:
             expansion_results = await asyncio.gather(*expansion_tasks, return_exceptions=True)
             expansion_executor.shutdown(wait=False)
             
-            # Process expansion results and perform searches
+            # Process expansion results
+            category_expanded_terms = {}
             for idx, category in enumerate(categories_to_expand):
                 expansion_result, expansion_duration = expansion_results[idx]
                 
@@ -1768,18 +1857,24 @@ class ChatService:
                     "language": language,
                     "duration_ms": round(expansion_duration, 1),
                 }
-                
+                category_expanded_terms[category] = expanded_terms
+            
+            # Perform searches in PARALLEL (including reranking)
+            def search_for_category(category: str) -> List[Dict[str, Any]]:
+                expanded_terms = category_expanded_terms.get(category, [])
                 if expanded_terms:
-                    category_results = self._search_with_expansion(
+                    results = self._search_with_expansion(
                         query=query,
                         expanded_terms=expanded_terms,
                         limit=limit,
                         files=files,
                         only_valid=only_valid,
                         use_reranking=use_reranking,
+                        category=category,
+                        debug_collector=debug_collector,
                     )
                 else:
-                    category_results = self.search_service.search(
+                    results = self.search_service.search(
                         query=query,
                         limit=limit,
                         files=files,
@@ -1787,14 +1882,31 @@ class ChatService:
                         use_reranking=use_reranking,
                     )
                 
-                if expand_context and category_results:
-                    category_results = self.search_service.expand_context(
-                        category_results, max_adjacent_per_result=2
+                if expand_context and results:
+                    results = self.search_service.expand_context(
+                        results, max_adjacent_per_result=2
                     )
-                
-                # Store results for debug
-                category_results_dict[category] = category_results
-                category_contexts[category] = self._build_context(category_results)
+                return results
+            
+            # Run searches in parallel using thread pool
+            search_executor = ThreadPoolExecutor(max_workers=len(categories_to_expand))
+            loop = asyncio.get_event_loop()
+            search_tasks = [
+                loop.run_in_executor(search_executor, search_for_category, category)
+                for category in categories_to_expand
+            ]
+            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+            search_executor.shutdown(wait=False)
+            
+            # Store results
+            for idx, category in enumerate(categories_to_expand):
+                if isinstance(search_results[idx], Exception):
+                    logger.error(f"Search failed for {category}: {search_results[idx]}")
+                    category_results_dict[category] = []
+                    category_contexts[category] = ""
+                else:
+                    category_results_dict[category] = search_results[idx]
+                    category_contexts[category] = self._build_context(search_results[idx])
         else:
             # No query expansion - use standard search for all categories
             results = self.search_service.search(
@@ -1828,32 +1940,16 @@ class ChatService:
         if debug_collector and expand_query and category_expansions:
             expansion_debug_info = {}
             for category, exp_info in category_expansions.items():
-                chunks = category_results_dict.get(category, [])
                 expansion_debug_info[category] = {
                     "expanded_terms": exp_info["expanded_terms"],
                     "language": exp_info["language"],
                     "duration_ms": exp_info["duration_ms"],
-                    "chunks_retrieved": len(chunks),
-                    "chunks": [
-                        {
-                            "rank": i+1,
-                            "title": r.get("title", ""),
-                            "page": r.get("page_number", 0),
-                            "score": round(r.get("score", 0), 4),
-                            "source": r.get("_source", "original"),
-                            "text_preview": r.get("text", "")[:300] + "..." if len(r.get("text", "")) > 300 else r.get("text", ""),
-                            "text_full": r.get("text", ""),  # Full text for detailed view
-                            "text_length": len(r.get("text", "")),
-                        }
-                        for i, r in enumerate(chunks)
-                    ],
                 }
             
             debug_collector.add_step(
-                "Per-Category Query Expansion & Search",
-                f"Expanded and searched for {len(category_expansions)} categories",
-                expansion_debug_info,
-                truncate_at=500000  # Allow more data for full chunks
+                "Query Expansion Summary",
+                f"Expanded queries for {len(category_expansions)} categories",
+                expansion_debug_info
             )
         
         # Step 4: Parallel LLM extractions (each with its own context)
@@ -1897,8 +1993,8 @@ class ChatService:
                         "duration_ms": round(duration, 1),
                         "items_found": len(items) if isinstance(items, list) else 0,
                         "chunks_available": len(available_chunks),
-                        "extracted_items": items if isinstance(items, list) else [],  # Show all items in debug
-                        "raw_response": raw[:500] + "..." if len(str(raw)) > 500 else raw,
+                        "extracted_items": items if isinstance(items, list) else [],
+                        "raw_response": raw,
                     }
                     
                     # Add chunk summary for this category
@@ -1909,6 +2005,7 @@ class ChatService:
                                 "title": r.get("title", ""),
                                 "page": r.get("page_number", 0),
                                 "score": round(r.get("score", 0), 4),
+                                "text": r.get("text", ""),
                             }
                             for i, r in enumerate(available_chunks)
                         ]
@@ -1972,8 +2069,7 @@ class ChatService:
             debug_collector.add_step(
                 "Results Combined",
                 "Merged all extractions into term entry",
-                {**term_entry, "match_quality": match_quality},
-                truncate_at=3000
+                {**term_entry, "match_quality": match_quality}
             )
         
         # Step 7: Format response
@@ -1986,8 +2082,7 @@ class ChatService:
             debug_collector.add_step(
                 "Response Formatted",
                 "Converted to human-readable markdown",
-                formatted_response,
-                truncate_at=2000
+                formatted_response
             )
         
         logger.info(f"✅ Parallel extraction complete for: {query}")

@@ -379,14 +379,19 @@ def _format_debug_output(debug_info: dict) -> str:
         if "Filters Applied" in name:
             filters_info = data
         
-        if "Per-Category" in name:
-            for cat, cat_data in data.items():
-                if isinstance(cat_data, dict):
-                    expansion_data[cat] = {
-                        "expanded_terms": cat_data.get("expanded_terms", []),
-                        "chunks": cat_data.get("chunks", []),
-                        "duration_ms": cat_data.get("duration_ms", 0),
-                    }
+        if "Search & Reranking" in name:
+            # Extract category from step name like "Search & Reranking [definitions]"
+            import re
+            match = re.search(r'\[([^\]]+)\]', name)
+            if match:
+                cat = match.group(1)
+                expansion_data[cat] = {
+                    "expanded_terms": data.get("expanded_terms", []),
+                    "chunks": data.get("top_results", []),
+                    "duration_ms": 0,  # Duration tracked elsewhere
+                    "mode_used": data.get("mode_used", ""),
+                    "combined_count": data.get("combined_count", 0),
+                }
         
         if "Parallel LLM" in name:
             for ext in data:
@@ -421,45 +426,34 @@ def _format_debug_output(debug_info: dict) -> str:
         
         for cat, cat_info in expansion_data.items():
             cat_label = {"definitions": "📖 Definitsioonid", "related_terms": "🔗 Seotud terminid",
-                         "usage_evidence": "📝 Kasutusseosed"}.get(cat, cat)
+                         "usage_evidence": "📝 Kasutuskontekstid"}.get(cat, cat)
             
             expanded = cat_info.get("expanded_terms", [])
             chunks = cat_info.get("chunks", [])
-            duration = cat_info.get("duration_ms", 0)
+            mode_used = cat_info.get("mode_used", "")
+            combined_count = cat_info.get("combined_count", 0)
             
             lines.append(f"#### {cat_label}")
-            lines.append(f"*{duration:.0f}ms*")
-            lines.append("")
             
             if expanded:
-                lines.append(f"**Laiendatud otsing:** {', '.join(expanded)}")
-                lines.append("")
+                lines.append(f"**Laiendatud terminid:** {', '.join(expanded)}")
             
-            lines.append(f"**Leitud {len(chunks)} lõiku:**")
+            if mode_used:
+                mode_label = "reranking" if mode_used == "reranking" else "skooripõhine sorteerimine"
+                lines.append(f"**Režiim:** {mode_label} ({combined_count} → {len(chunks)})")
+            
             lines.append("")
             
-            for i, chunk in enumerate(chunks, 1):  # Show all chunks
-                title = chunk.get("title", "?")
-                page = chunk.get("page", "?")
-                score = chunk.get("score", 0)
-                lines.append(f"{i}. *{title}* (lk {page}, skoor {score:.2f})")
-            lines.append("")
-            
-            # Expandable full chunks
             if chunks:
-                lines.append("<details>")
-                lines.append("<summary>Näita lõikude sisu</summary>")
+                lines.append(f"**Parimad {len(chunks)} lõiku:**")
                 lines.append("")
-                for i, chunk in enumerate(chunks, 1):
+                
+                for chunk in chunks:
+                    rank = chunk.get("rank", "?")
                     title = chunk.get("title", "?")
                     page = chunk.get("page", "?")
-                    text = chunk.get("text_full", chunk.get("text_preview", ""))
-                    lines.append(f"**{i}. {title} (lk {page})**")
-                    lines.append("```")
-                    lines.append(text)  # Full text, no truncation
-                    lines.append("```")
-                    lines.append("")
-                lines.append("</details>")
+                    score = chunk.get("score", 0)
+                    lines.append(f"{rank}. *{title}* (lk {page}, skoor {score:.4f})")
                 lines.append("")
     
     # Step 4: LLM extraction results
@@ -545,7 +539,7 @@ def _format_debug_output(debug_info: dict) -> str:
     
     # LLM Call Details - Show full inputs and outputs (collapsible)
     lines.append("---")
-    lines.append("### 🔬 LLM Kõned (täielik sisend ja väljund)")
+    lines.append("### 🔬 LLM päringud (sisend ja väljund)")
     lines.append("")
     
     # Find all LLM-related steps and group them by call
@@ -596,11 +590,11 @@ def _format_debug_output(debug_info: dict) -> str:
                 continue
             
             # Extract call type from step name
-            call_type = "LLM Kõne"
+            call_type = "LLM päring"
             if "Query Expansion" in step_name:
                 call_type = f"Päringu laiendamine [{call_id}]"
             elif "Parallel LLM" in step_name:
-                call_type = f"Paralleelne ekstraktsioon [{call_id}]"
+                call_type = f"Paralleelne päringu laiendamine [{call_id}]"
             
             lines.append("<details>")
             lines.append(f"<summary><b>{call_type}</b> ({duration:.0f}ms)</summary>")
@@ -612,7 +606,7 @@ def _format_debug_output(debug_info: dict) -> str:
                 if data_str:
                     try:
                         data = json.loads(data_str)
-                        lines.append("**📥 LLM Sisend (täielik prompt):**")
+                        lines.append("**📥 LLM sisend (kogu viip):**")
                         lines.append("")
                         if isinstance(data, dict):
                             if "full_prompt" in data:
@@ -663,7 +657,7 @@ def _format_debug_output(debug_info: dict) -> str:
                 if data_str:
                     try:
                         data = json.loads(data_str)
-                        lines.append("**📤 LLM Väljund (täielik vastus):**")
+                        lines.append("**📤 LLM väljund (kogu vastus):**")
                         lines.append("")
                         if isinstance(data, dict):
                             raw_response = data.get("raw_response", data.get("response", str(data)))
@@ -691,7 +685,7 @@ def _format_debug_output(debug_info: dict) -> str:
     # All pipeline steps (collapsed)
     lines.append("---")
     lines.append("<details>")
-    lines.append("<summary>📋 Kõik pipeline sammud (täielik)</summary>")
+    lines.append("<summary>📋 Kõik pipeline'i sammud</summary>")
     lines.append("")
     
     for step in steps:

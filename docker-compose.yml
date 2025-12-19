@@ -38,6 +38,7 @@ services:
       - 8000
     volumes:
       - ./config/config.json:/app/config/config.json
+      - ./backend:/app/backend
     depends_on:
       - db
       - qdrant

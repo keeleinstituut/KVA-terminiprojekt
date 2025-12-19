@@ -13,9 +13,8 @@
         "sparse_weight": 0.3
     },
     "reranking": {
-        "enabled": false,
-        "model": "BAAI/bge-reranker-v2-m3",
-        "top_k": 5
+        "enabled": true,
+        "model": "BAAI/bge-reranker-base"
     },
     "llm": {
         "model": "gpt-4o",
