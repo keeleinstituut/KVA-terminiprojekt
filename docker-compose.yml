@@ -45,6 +45,8 @@ services:
     environment:
       - QDRANT_HOST=qdrant
       - PG_HOST=db
+      - SERVICE_NAME
+      - HEADER_COLOR
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -73,6 +75,8 @@ services:
       - BACKEND_URL=http://backend:8000
       - QDRANT_HOST=qdrant
       - PG_HOST=db
+      - SERVICE_NAME
+      - HEADER_COLOR
 
 volumes:
   database_data:

@@ -3,9 +3,15 @@ Main Panel application - session handling only.
 Heavy initialization is done once in init_app.py
 """
 import panel as pn
+import os
 
 # Import from cached init module (runs only ONCE)
 from init_app import logger, file_upload, llm_view, prompt_view, document_management
+
+
+# Retrieve service name and header color from environment variables
+SERVICE_NAME = os.getenv("SERVICE_NAME", "riigikaitse")
+HEADER_COLOR = os.getenv("HEADER_COLOR", "#6ab6e6")
 
 
 # Define the layout areas for the Panel UI
@@ -44,10 +50,13 @@ def create_template(guest_mode=False):
         tabs.append(("Promptide haldamine", prompt_view_area))
 
     template = pn.template.VanillaTemplate(
-        title="Tehisintellekti rakendamine riigikaitseterminoloogia valdkonnas",
+        title=f"Tehisintellekti rakendamine {SERVICE_NAME} valdkonnas",
         main=[tabs],
         sidebar_width=300,
     )
+
+    # Apply the header color dynamically
+    template.header_background = HEADER_COLOR
 
     # Add logout button to the header (less prominent)
     logout_btn = pn.widgets.Button(
