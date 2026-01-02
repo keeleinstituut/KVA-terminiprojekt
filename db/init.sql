@@ -56,12 +56,16 @@ INSERT INTO prompts (prompt_type, prompt_text, description, prompt_set_id) VALUE
 ('definitions_extraction',
 '**Role:** You are a terminologist extracting definitions for a keyword.
 
-**Task:** Extract ALL definitions that describe or define the keyword from the provided document sections.
+**Task:** Extract ALL CORRECT definitions for user queried term from the documents provided.
 
 **Instructions:**
 - Extract every definition found, using EXACT QUOTES from the source
-- Include formal definitions, explanations, and descriptive statements that clarify what the term means
-- Note the source document and page number for each definition
+- A **correct definition** follows the patterns:
+1) [Term] is a [genus] that/which [differentia]
+2) [Term] - [genus + differentia] (can replace term in context)
+3) [genus] + [essential characteristic 1] + [essential characteristic 2] + ... 
+- Before answering, check whether the output meets the conditions of a correct definition and a good usage example.
+- If NO DEFINITIONS are found for the user query, defintion-like statements or definitions of synonyms and closely related terms are acceptable
 
 **Output Format (JSON only):**
 ```json
@@ -72,40 +76,46 @@ INSERT INTO prompts (prompt_type, prompt_text, description, prompt_set_id) VALUE
 }
 ```
 
-Remember: Use exact quotes only. If no definitions found, return {"definitions": []}',
+Remember: Use exact quotes only.
+If no definitions found, return {"definitions": []}',
 'Specialized prompt for extracting definitions only (used in parallel mode)',
 (SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs')),
 
 ('related_terms_extraction',
-'**Role:** You are a terminologist identifying related terms for a keyword.
+'**Role:** You are a terminologist identifying semantically related terms for a keyword.
 
-**Task:** Extract terms related to the keyword that are EXPLICITLY MENTIONED in the provided document sections.
+**Task:** Extract terms that are in the documents that are semantically related to user query, consider the relations using the markers below.
 
 **CRITICAL RULES:**
-- ONLY include terms that actually appear in the provided text
+- ONLY include terms that actually appear in the provided text, if the form of the word is not sg nom, modify it to sg nom
 - Do NOT invent or infer terms that are not written in the sources
 - The source you cite MUST be where you found the term
-- If a term appears in multiple sources, cite any one of them
+- Provide as many related terms as possible
+- Rank by most relevant first
 
 **Types of relationships to look for:**
-1. **Synonyms** - alternative names, translations for the same concept
-2. **Broader terms** - general categories the keyword belongs to (if stated in text)
-3. **Narrower terms** - specific types/subcategories (if stated in text)  
-4. **Abbreviations** - short forms explicitly linked to the keyword
-5. **Equivalent** - terms explicitly described as interchangeable
-6. **Other** - co-occurring terms in the same sentence or paragraph
+1. Hypernymy (broader): is a, type of, kind of, category of, genus in definition
+2. Hyponymy (narrower): such as, including, e.g., for example, types of
+3. Meronymy (parts): part of, consists of, contains, includes, component of
+4. Synonymy (equivalent): also called, or, i.e., namely, aka, known as, short forms
+5. Function (purpose): used for, serves to, function is, designed to, performs
+6. Attribute (property): characterized by, has property, with, features
+7. Agent-Action: performs, carries out, responsible for, conducts
+8. Instrument: using, by means of, with the help of, through
+9. Other related terms: unlike, opposed to, rather than, vs, contrary to
+
 
 **Output Format (JSON only):**
 ```json
 {
   "related_terms": [
-    {"term": "term from text", "relation_type": "synonym|broader|narrower|abbreviation|equivalent|other", "source": "Document where term appears", "page": 1, "url": "url if provided"}
+    {"term": "term from text", "relation_type": "hyperonym|hyponym|synonym|function|attribute|agent-action|instrument|other", "source": "Document where term appears", "page": 1, "url": "url if provided"}
   ]
 }
 ```
 
 Remember: 
-- relation_type must be one of: synonym, broader, narrower, abbreviation, equivalent, other
+- relation_type must be one of: hyperonym|hyponym|synonym|function|attribute|agent-action|instrument|other
 - ONLY include terms you can quote from the provided text
 - If no related terms are explicitly mentioned, return {"related_terms": []}',
 'Specialized prompt for extracting related terms only (used in parallel mode)',
@@ -114,38 +124,36 @@ Remember:
 ('usage_evidence_extraction',
 '**Role:** You are a terminologist finding usage examples for a keyword.
 
-**Task:** Find ALL passages that demonstrate how the keyword is used in context. Make them readable and concise.
+**Task:** Extract GOOD passages of how the user queried term is used in context, from the documents provided.
 
 **Instructions:**
 - Extract every relevant passage found in the provided sections that shows the keyword in domain-specific usage
-- For each passage, provide a brief context/intro explaining why this example is relevant. **The context must be in Estonian.**
 - The actual quote (text field) must be EXACT from the source - this is critical for citation linking
-- Keep quotes concise: extract the most relevant 1-2 sentences, not entire paragraphs
-- If a passage is long, select only the most informative portion containing the keyword
 - **CRITICAL:** You must include the exact "source" (Document Title) and "page" number from the provided text chunks. Do not output "Unknown" if the source is available in the text.
 
-**Confidence levels:**
-- "direct": The EXACT keyword appears in this quote
-- "strong": A very close variant (plural, different case) of the keyword appears
-- "inferred": The quote discusses the concept but uses different terminology
+A **good usage example**:
+1) is drawn from real-world usage in the field
+2) represents common, standard usage
+3) provides enough surrounding text to understand usage
+4) demonstrates the term`s meaning unambiguously
+5) provides additional information complementing the definition
+6) is NOT a definition
 
 **Output Format (JSON only):**
 ```json
 {
   "usage_evidence": [
     {
-      "context": "Brief intro in Estonian explaining relevance",
       "text": "EXACT short quote from source containing the keyword",
       "source": "Document Title",
       "page": 1,
       "url": "url if provided",
-      "confidence": "direct|strong|inferred"
     }
   ]
 }
 ```
 
-CRITICAL: The "text" field must contain the EXACT wording from the document. The "context" field must be in Estonian. Ensure "source" and "page" are correctly extracted. Extract ALL relevant passages found, not just a limited number.',
+CRITICAL: The "text" field must contain the EXACT wording from the document. Ensure "source" and "page" are correctly extracted. Extract ALL relevant passages found, not just a limited number.',
 'Specialized prompt for extracting usage evidence only (used in parallel mode)',
 (SELECT id FROM prompt_sets WHERE name = 'Vaikimisi terminoloogiaanalüüs')),
 
