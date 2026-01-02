@@ -6,8 +6,19 @@
         "passage_prompt": "passage: ",
         "query_prompt": "query: "
     },
+    "hybrid_search": {
+        "enabled": true,
+        "sparse_model": "Qdrant/bm25",
+        "dense_weight": 0.7,
+        "sparse_weight": 0.3
+    },
+    "reranking": {
+        "enabled": true,
+        "model": "BAAI/bge-reranker-base"
+    },
     "llm": {
-        "model": "gpt-4o"
+        "model": "gpt-4o",
+        "temperature": 0
     },
     "intermediate_storage": {
         "json_storage_path": "../data/temp/",

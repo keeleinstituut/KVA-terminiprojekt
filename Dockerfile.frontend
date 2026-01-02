@@ -1,0 +1,27 @@
+# Frontend Dockerfile - Panel UI (lightweight, no ML packages)
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install only frontend dependencies - NO heavy ML packages
+# torch, sentence-transformers, fastembed are NOT needed here
+RUN pip install --no-cache-dir \
+    panel==1.5.3 \
+    httpx>=0.24.0 \
+    pandas==2.2.2 \
+    python-dotenv==1.0.1 \
+    sqlalchemy==2.0.30 \
+    psycopg2-binary==2.9.9 \
+    PyJWT>=2.8.0
+
+# Copy application code
+COPY app/ /app/app/
+COPY utils/ /app/utils/
+COPY config/ /app/config/
+
+EXPOSE 5006
+
+WORKDIR /app/app
+
+# Run the Panel frontend
+CMD ["panel", "serve", "main.py", "--address=0.0.0.0", "--port=5006", "--allow-websocket-origin=*", "--cookie-secret=kva_secret", "--basic-auth=../config/credentials.json", "--websocket-max-message-size=157286400"]

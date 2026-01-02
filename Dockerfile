@@ -7,7 +7,10 @@ WORKDIR /app
 # Copy the requirements file into the container
 COPY requirements.txt /app/
 
-# Install the Python dependencies
+# Install PyTorch (regular version works on CPU, +cpu builds not available for 2.3.1)
+RUN pip install --no-cache-dir torch==2.3.1
+
+# Install the rest of the Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 5006
@@ -27,6 +30,10 @@ RUN ls -l
 
 WORKDIR /app/app
 
-# Run the command to start the application
-ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "1", "--websocket-max-message-size", "157286400"]
-CMD ["--cookie-secret", "my_super_safe_cookie_secret_2", "--basic-auth", "../config/credentials.json"]
+# Start Panel server
+CMD ["panel", "serve", "main.py", \
+     "--allow-websocket-origin", "*", \
+     "--num-procs", "1", \
+     "--websocket-max-message-size", "157286400", \
+     "--cookie-secret", "my_super_safe_cookie_secret_2", \
+     "--basic-auth", "../config/credentials.json"]

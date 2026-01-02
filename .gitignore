@@ -5,3 +5,8 @@ app/views/__pycache__
 data/
 utils/__pycache__
 .env
+assets/
+arendajale/
+cookies.txt
+.DS_Store
+__pycache__/
