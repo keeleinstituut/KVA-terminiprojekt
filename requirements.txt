@@ -9,7 +9,7 @@ python-dotenv==1.0.1
 sqlalchemy==2.0.30
 
 # Frontend (Panel)
-panel==1.5.3
+panel==1.7.2
 httpx>=0.24.0
 
 # Backend (FastAPI)
