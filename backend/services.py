@@ -19,7 +19,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.models import (
     FieldCondition, Filter, MatchAny, MatchValue, Range,
     Prefetch, FusionQuery, Fusion, SparseVector,
-    PointStruct, Distance, VectorParams,
+    PointStruct, Distance, VectorParams, SparseVectorParams,
+    SparseIndexParams
 )
 
 # Sentinel value for "no expiration" - year 2100
@@ -2543,7 +2544,19 @@ class UploadService:
                 embedding_size = self.config["embeddings"]["embedding_size"]
                 self.search_service.client.create_collection(
                     collection_name=self.collection_name,
-                    vectors_config=VectorParams(size=embedding_size, distance=Distance.COSINE),
+                    vectors_config={
+                    "dense": VectorParams(
+                        size=embedding_size,
+                        distance=Distance.COSINE,
+                    ),
+                },
+                sparse_vectors_config={
+                    "sparse": SparseVectorParams(
+                        index=SparseIndexParams(
+                            on_disk=False,
+                        ),
+                    ),
+                 }
                 )
                 logger.info(f"Created collection: {self.collection_name}")
             

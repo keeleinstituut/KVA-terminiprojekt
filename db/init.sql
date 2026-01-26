@@ -1,16 +1,31 @@
 CREATE TYPE document_state AS ENUM ('processing', 'uploaded', 'failed');
 
+CREATE TYPE document_type AS ENUM (
+        'legal_act',        -- õigusakt
+        'educational',      -- õppematerjal
+        'thesis',           -- lõputöö
+        'article',          -- erialaartikkel
+        'glossary',         -- erialasõnastik
+        'media',            -- meedia
+        'social_media',     -- sotsiaalmeedia
+        'other'             -- muu
+    );
+
 CREATE TABLE documents(
     id serial PRIMARY KEY,
     pdf_filename VARCHAR(255) NOT NULL,
     json_filename VARCHAR(255) NOT NULL,
     title VARCHAR(255) NOT NULL,
+    short_name VARCHAR(100),
     publication VARCHAR(255),
     year INT,
     author VARCHAR(255),
     languages VARCHAR(255),
     url VARCHAR(255),
+    document_type document_type,
+    is_translation BOOLEAN DEFAULT FALSE,
     is_valid BOOLEAN,
+    valid_until DATE,
     date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     date_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     date_vectordb_modified TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -18,6 +33,13 @@ CREATE TABLE documents(
     UNIQUE (pdf_filename),
     UNIQUE (title)
 );
+
+-- Add comments
+COMMENT ON COLUMN documents.document_type IS 'Dokumendi tüüp: õigusakt, õppematerjal, lõputöö, erialaartikkel, erialasõnastik, meedia, sotsiaalmeedia, muu';
+COMMENT ON COLUMN documents.short_name IS 'Dokumendi lühinimi (nt "KVKS" õigusakti puhul)';
+COMMENT ON COLUMN documents.is_translation IS 'Kas dokument on tõlge';
+COMMENT ON COLUMN documents.valid_until IS 'Kehtiv kuni - kui NULL, siis tähtajatu; kui minevikus, siis kehtetu';
+COMMENT ON COLUMN documents.languages IS 'Keelekoodid komadega eraldatult (nt "et,en,ru")';
 
 CREATE TABLE keywords(
     id serial PRIMARY KEY,
