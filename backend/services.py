@@ -348,68 +348,107 @@ class SearchService:
         self,
         title: str,
         page_number: int,
+        chunk_index: int = None,
         exclude_text: str = None,
     ) -> List[Dict[str, Any]]:
         """
-        Fetch chunks from adjacent pages (page-1, page, page+1) of the same document.
-        
+        Fetch the previous and next chunk for a given chunk in the same document.
+
+        When chunk_index is provided (documents uploaded after this change), uses an
+        exact index range filter so ordering is guaranteed regardless of page boundaries.
+        Falls back to a page-based heuristic for older documents that have no chunk_index.
+
         Args:
             title: Document title to filter by
-            page_number: Center page number
-            exclude_text: Text to exclude (the original chunk) - first 100 chars used for matching
-            
+            page_number: Center page number (used for legacy fallback)
+            chunk_index: Sequential 0-based position of the chunk within the document
+            exclude_text: Text of the original chunk – used to exclude it from results
+
         Returns:
-            List of adjacent chunks sorted by page number
+            List of adjacent chunks sorted by chunk_index (or page_number for legacy data)
         """
-        # Build filter for same document and adjacent pages
-        adjacent_pages = [max(1, page_number - 1), page_number, page_number + 1]
-        
-        conditions = [
-            FieldCondition(key="validated", match=MatchValue(value=True)),
-            FieldCondition(key="title", match=MatchValue(value=title)),
-        ]
-        
-        # Scroll to get all chunks matching criteria
+        exclude_prefix = exclude_text[:100] if exclude_text else None
+
         try:
-            results, _ = self.client.scroll(
-                collection_name=self.collection_name,
-                scroll_filter=Filter(must=conditions),
-                limit=50,  # Reasonable limit for a single document's adjacent pages
-                with_payload=True,
-            )
-            
-            # Filter to adjacent pages and format
-            adjacent_chunks = []
-            exclude_prefix = exclude_text[:100] if exclude_text else None
-            
-            for point in results:
-                if not point.payload:
-                    continue
-                chunk_page = point.payload.get("page_number", 0)
-                chunk_text = point.payload.get("text", "")
-                
-                # Only include chunks from adjacent pages
-                if chunk_page not in adjacent_pages:
-                    continue
-                
-                # Skip the original chunk (by matching text prefix)
-                if exclude_prefix and chunk_text.startswith(exclude_prefix):
-                    continue
-                
-                adjacent_chunks.append({
-                    "text": chunk_text,
-                    "title": point.payload.get("title", ""),
-                    "page_number": chunk_page,
-                    "score": 0,  # No score for adjacent chunks
-                    "content_type": point.payload.get("content_type", ""),
-                    "url": point.payload.get("url", ""),
-                    "_is_adjacent": True,
-                })
-            
-            # Sort by page number
-            adjacent_chunks.sort(key=lambda x: x["page_number"])
-            return adjacent_chunks
-            
+            if chunk_index is not None:
+                # --- Exact index-based retrieval ---
+                prev_index = max(0, chunk_index - 1)
+                next_index = chunk_index + 1
+                conditions = [
+                    FieldCondition(key="validated", match=MatchValue(value=True)),
+                    FieldCondition(key="title", match=MatchValue(value=title)),
+                    FieldCondition(
+                        key="chunk_index",
+                        range=Range(gte=prev_index, lte=next_index),
+                    ),
+                ]
+                results, _ = self.client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=Filter(must=conditions),
+                    limit=3,
+                    with_payload=True,
+                )
+                adjacent_chunks = []
+                for point in results:
+                    if not point.payload:
+                        continue
+                    chunk_text = point.payload.get("text", "")
+                    idx = point.payload.get("chunk_index")
+                    if idx == chunk_index:
+                        continue  # skip the original
+                    if exclude_prefix and chunk_text.startswith(exclude_prefix):
+                        continue
+                    adjacent_chunks.append({
+                        "text": chunk_text,
+                        "title": point.payload.get("title", ""),
+                        "page_number": point.payload.get("page_number", 0),
+                        "chunk_index": idx,
+                        "total_chunks": point.payload.get("total_chunks"),
+                        "score": 0,
+                        "content_type": point.payload.get("content_type", ""),
+                        "url": point.payload.get("url", ""),
+                        "_is_adjacent": True,
+                    })
+                adjacent_chunks.sort(key=lambda x: x["chunk_index"] if x["chunk_index"] is not None else 0)
+                return adjacent_chunks
+
+            else:
+                # --- Legacy fallback: page-based heuristic ---
+                adjacent_pages = [max(1, page_number - 1), page_number, page_number + 1]
+                conditions = [
+                    FieldCondition(key="validated", match=MatchValue(value=True)),
+                    FieldCondition(key="title", match=MatchValue(value=title)),
+                ]
+                results, _ = self.client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=Filter(must=conditions),
+                    limit=50,
+                    with_payload=True,
+                )
+                adjacent_chunks = []
+                for point in results:
+                    if not point.payload:
+                        continue
+                    chunk_page = point.payload.get("page_number", 0)
+                    chunk_text = point.payload.get("text", "")
+                    if chunk_page not in adjacent_pages:
+                        continue
+                    if exclude_prefix and chunk_text.startswith(exclude_prefix):
+                        continue
+                    adjacent_chunks.append({
+                        "text": chunk_text,
+                        "title": point.payload.get("title", ""),
+                        "page_number": chunk_page,
+                        "chunk_index": None,
+                        "total_chunks": None,
+                        "score": 0,
+                        "content_type": point.payload.get("content_type", ""),
+                        "url": point.payload.get("url", ""),
+                        "_is_adjacent": True,
+                    })
+                adjacent_chunks.sort(key=lambda x: x["page_number"])
+                return adjacent_chunks
+
         except Exception as e:
             logger.warning(f"Failed to fetch adjacent chunks: {e}")
             return []
@@ -441,22 +480,24 @@ class SearchService:
         for result in results:
             title = result.get("title", "")
             page = result.get("page_number", 0)
+            chunk_index = result.get("chunk_index")
             original_text = result.get("text", "")
-            
+
             # Add the original result
             if original_text[:100] not in seen_texts:
                 result["_is_adjacent"] = False
                 expanded.append(result)
                 seen_texts.add(original_text[:100])
-            
+
             # Fetch adjacent chunks
-            if title and page > 0:
+            if title and (chunk_index is not None or page > 0):
                 adjacent = self._fetch_adjacent_chunks(
                     title=title,
                     page_number=page,
+                    chunk_index=chunk_index,
                     exclude_text=original_text,
                 )
-                
+
                 # Add up to max_adjacent_per_result adjacent chunks
                 added = 0
                 for adj in adjacent:
@@ -465,9 +506,13 @@ class SearchService:
                         expanded.append(adj)
                         seen_texts.add(adj_text[:100])
                         added += 1
-        
-        # Sort by title and page to keep context coherent
-        expanded.sort(key=lambda x: (x.get("title", ""), x.get("page_number", 0)))
+
+        # Sort by title then chunk_index (preferred) or page_number (legacy fallback)
+        def _sort_key(x):
+            idx = x.get("chunk_index")
+            return (x.get("title", ""), idx if idx is not None else x.get("page_number", 0))
+
+        expanded.sort(key=_sort_key)
         
         logger.info(f"Context expansion: {len(results)} original → {len(expanded)} with adjacent")
         return expanded
@@ -671,12 +716,78 @@ class SearchService:
                 "text": point.payload.get("text", ""),
                 "title": point.payload.get("title", ""),
                 "page_number": point.payload.get("page_number", 0),
+                "chunk_index": point.payload.get("chunk_index"),
+                "total_chunks": point.payload.get("total_chunks"),
                 "score": point.score,
                 "content_type": point.payload.get("content_type", ""),
                 "url": point.payload.get("url", ""),
             })
         return formatted
     
+    def get_full_text(self, title: str) -> Dict[str, Any]:
+        """
+        Retrieve all text chunks for a document by title, in order.
+
+        Scrolls through all Qdrant points matching the given title,
+        sorts them by chunk_index (or page_number for legacy documents),
+        and returns the concatenated full text along with individual chunks.
+
+        Args:
+            title: Exact document title as stored in Qdrant
+
+        Returns:
+            Dict with keys: title, full_text, chunks, total_chunks
+        """
+        if not self._initialized:
+            raise RuntimeError("SearchService not initialized")
+
+        scroll_filter = Filter(
+            must=[
+                FieldCondition(key="validated", match=MatchValue(value=True)),
+                FieldCondition(key="title", match=MatchValue(value=title)),
+            ]
+        )
+
+        chunks = []
+        offset = None
+
+        while True:
+            results, next_offset = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=scroll_filter,
+                limit=100,
+                offset=offset,
+                with_payload=True,
+            )
+
+            for point in results:
+                if not point.payload:
+                    continue
+                chunks.append({
+                    "text": point.payload.get("text", ""),
+                    "page_number": point.payload.get("page_number", 0),
+                    "chunk_index": point.payload.get("chunk_index"),
+                    "content_type": point.payload.get("content_type", ""),
+                })
+
+            if next_offset is None:
+                break
+            offset = next_offset
+
+        # Sort by chunk_index when available, fall back to page_number
+        chunks.sort(key=lambda c: (
+            c["chunk_index"] if c["chunk_index"] is not None else c["page_number"]
+        ))
+
+        full_text = "\n\n".join(c["text"] for c in chunks)
+
+        return {
+            "title": title,
+            "full_text": full_text,
+            "chunks": chunks,
+            "total_chunks": len(chunks),
+        }
+
     def _rerank(
         self,
         query: str,
@@ -2474,6 +2585,8 @@ class UploadService:
             payload = document_metadata.copy()
             payload["text"] = chunk_data["text"]
             payload["page_number"] = chunk_data["page_number"]
+            payload["chunk_index"] = i
+            payload["total_chunks"] = total_chunks
             payload["content_type"] = "text"
             payload["date_created"] = datetime.now().isoformat()
             payload["validated"] = True

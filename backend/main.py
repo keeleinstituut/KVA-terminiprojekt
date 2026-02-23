@@ -17,7 +17,7 @@ import threading
 from contextlib import asynccontextmanager
 from typing import List
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -40,6 +40,7 @@ from backend.schemas import (
     DocumentDetail, DocumentListItem, DocumentsListResponse, DocumentUpdate, DocumentDeleteResponse,
     PromptSetInfo, PromptSetDetail, PromptSetsListResponse,
     PromptDetail, PromptUpdate,
+    FullTextResponse,
 )
 from backend.services import SearchService, ChatService, UploadService, PromptService
 from utils.db_connection import Connection
@@ -320,6 +321,29 @@ async def get_filters():
         return FiltersResponse(documents=documents, keywords=keywords)
     except Exception as e:
         logger.error(f"Filters error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/documents/full-text", response_model=FullTextResponse, tags=["Documents"])
+async def get_full_text(
+    title: str = Query(..., description="Exact document title as stored in Qdrant"),
+    service: SearchService = Depends(get_search_service),
+):
+    """
+    Retrieve the full text of a document from Qdrant by its title.
+
+    Returns all validated chunks concatenated in order, along with individual
+    chunk metadata (page number, chunk index, content type).
+    """
+    try:
+        result = service.get_full_text(title=title)
+        if result["total_chunks"] == 0:
+            raise HTTPException(status_code=404, detail=f"No chunks found for title: {title!r}")
+        return FullTextResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Full text retrieval error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

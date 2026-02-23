@@ -306,3 +306,23 @@ class PromptUpdate(BaseModel):
 class PromptSetsListResponse(BaseModel):
     """Response listing all available prompt sets."""
     prompt_sets: List[PromptSetInfo]
+
+
+# ============================================================================
+# Full Text Models
+# ============================================================================
+
+class FullTextChunk(BaseModel):
+    """A single text chunk from a document."""
+    text: str
+    page_number: int
+    chunk_index: Optional[int] = None
+    content_type: Optional[str] = None
+
+
+class FullTextResponse(BaseModel):
+    """Full text of a document retrieved from Qdrant."""
+    title: str
+    full_text: str
+    chunks: List[FullTextChunk]
+    total_chunks: int
