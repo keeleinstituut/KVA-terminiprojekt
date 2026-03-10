@@ -3,11 +3,16 @@ CREATE TYPE document_state AS ENUM ('processing', 'uploaded', 'failed');
 CREATE TYPE document_type AS ENUM (
         'legal_act',        -- õigusakt
         'educational',      -- õppematerjal
-        'thesis',           -- lõputöö
+        'ba_thesis',		-- bakalaureusetöö
+        'ma_thesis'	,		-- magistritöö
+        'phd_thesis',		-- doktoritöö
         'article',          -- erialaartikkel
+        'thesis',
         'glossary',         -- erialasõnastik
         'media',            -- meedia
         'social_media',     -- sotsiaalmeedia
+        'guidline',			
+        'report',			-- raport
         'other'             -- muu
     );
 
