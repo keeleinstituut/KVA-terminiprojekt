@@ -1,7 +1,6 @@
 # Shared dependencies
 apscheduler==3.10.4
 PyJWT>=2.8.0
-nltk==3.8.1
 pandas==2.2.2
 psycopg2-binary==2.9.9
 pymupdf==1.24.5
