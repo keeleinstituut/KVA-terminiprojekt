@@ -28,6 +28,8 @@ CREATE TABLE documents(
     languages VARCHAR(255),
     url VARCHAR(255),
     document_type document_type,
+    publisher VARCHAR(255),
+    licence VARCHAR(255),
     is_translation BOOLEAN DEFAULT FALSE,
     is_valid BOOLEAN,
     valid_until DATE,

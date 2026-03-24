@@ -70,6 +70,7 @@ class TermEntry(BaseModel):
 class SearchFilters(BaseModel):
     """Filters for search queries."""
     files: List[str] = Field(default_factory=list, description="Filter by document titles")
+    languages: List[str] = Field(default_factory=list, description="Filter by language codes (e.g. ['et', 'en'])")
     limit: int = Field(default=5, ge=1, le=20, description="Number of results to return")
     only_valid: bool = Field(default=False, description="Only search valid documents")
 
@@ -173,6 +174,8 @@ class UploadMetadata(BaseModel):
     publication_year: int = 2024
     title: str = ""
     author: str = ""
+    publisher: str = ""
+    licence: str = ""
     languages: List[str] = Field(default_factory=list)
     keywords: List[str] = Field(default_factory=list)
     url: str = ""
@@ -199,6 +202,8 @@ class DocumentDetail(BaseModel):
     author: Optional[str] = None
     publication: Optional[str] = None
     publication_year: Optional[int] = None
+    publisher: Optional[str] = None
+    licence: Optional[str] = None
     url: Optional[str] = None
     languages: Optional[str] = None
     is_translation: bool = False
@@ -219,6 +224,8 @@ class DocumentListItem(BaseModel):
     document_type: Optional[str] = None
     author: Optional[str] = None
     publication_year: Optional[int] = None
+    publisher: Optional[str] = None
+    licence: Optional[str] = None
     is_valid: bool = True
     valid_until: Optional[str] = None
     current_state: Optional[str] = None
@@ -239,6 +246,8 @@ class DocumentUpdate(BaseModel):
     author: Optional[str] = Field(None, max_length=255)
     publication: Optional[str] = Field(None, max_length=255)
     publication_year: Optional[int] = Field(None, ge=1900, le=2100)
+    publisher: Optional[str] = Field(None, max_length=255)
+    licence: Optional[str] = Field(None, max_length=255)
     url: Optional[str] = Field(None, max_length=255)
     languages: Optional[str] = Field(None, max_length=255)
     is_translation: Optional[bool] = None

@@ -17,7 +17,7 @@ from urllib.parse import quote
 import fitz  # PyMuPDF
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import (
-    FieldCondition, Filter, MatchAny, MatchValue, Range,
+    FieldCondition, Filter, MatchAny, MatchValue, MatchText, Range,
     Prefetch, FusionQuery, Fusion, SparseVector,
     PointStruct, Distance, VectorParams, SparseVectorParams,
     SparseIndexParams
@@ -170,22 +170,33 @@ class SearchService:
         self,
         files: List[str] = None,
         only_valid: bool = False,
+        languages: List[str] = None,
     ) -> Optional[Filter]:
         """Build Qdrant filter from parameters."""
         conditions = []
-        
+
         # Always filter for validated chunks
         conditions.append(FieldCondition(
             key="validated",
             match=MatchValue(value=True),
         ))
-        
+
         if files:
             conditions.append(FieldCondition(
                 key="title",
                 match=MatchAny(any=files),
             ))
-        
+
+        if languages:
+            # Languages are stored as a comma-separated string (e.g. "et,en").
+            # MatchText tokenises on non-word chars so each code is a distinct token.
+            # Wrap in a nested Filter so multiple languages are OR-ed together.
+            lang_conditions = [
+                FieldCondition(key="languages", match=MatchText(text=lang))
+                for lang in languages
+            ]
+            conditions.append(Filter(should=lang_conditions))
+
         if only_valid:
             # Document is valid if:
             # 1. is_valid = true AND
@@ -218,6 +229,7 @@ class SearchService:
         limit: int = 5,
         files: List[str] = None,
         only_valid: bool = False,
+        languages: List[str] = None,
         ensure_diversity: bool = True,
         use_reranking: bool = True,
         debug: bool = False,
@@ -225,25 +237,26 @@ class SearchService:
         """
         Perform search (hybrid if enabled, otherwise dense-only).
         Optionally reranks results using a cross-encoder for better relevance.
-        
+
         Args:
             query: Search query text
             limit: Maximum number of results
             files: Filter by document titles
             only_valid: Only search valid documents
+            languages: Filter by language codes (e.g. ['et', 'en'])
             ensure_diversity: If True, ensures results from different documents
             use_reranking: If True and reranking is enabled, rerank results
             debug: If True, returns tuple of (results, debug_info) instead of just results
-            
+
         Returns:
             List of search results, or tuple of (results, debug_info) if debug=True
         """
         if not self._initialized:
             raise RuntimeError("SearchService not initialized")
-        
+
         debug_info = {} if debug else None
-        
-        query_filter = self._build_filter(files=files, only_valid=only_valid)
+
+        query_filter = self._build_filter(files=files, only_valid=only_valid, languages=languages)
         query_prompt = self.config["embeddings"]["query_prompt"]
         
         # Fetch more results for reranking/diversity (reranking benefits from more candidates)
@@ -1535,6 +1548,7 @@ class ChatService:
         limit: int,
         files: List[str] = None,
         only_valid: bool = False,
+        languages: List[str] = None,
         use_reranking: bool = True,
         category: str = None,
         debug_collector: 'DebugCollector' = None,
@@ -1558,6 +1572,7 @@ class ChatService:
             limit=fetch_limit,
             files=files,
             only_valid=only_valid,
+            languages=languages,
             use_reranking=False,  # Don't rerank yet
             debug=debug_collector is not None,
         )
@@ -1591,6 +1606,7 @@ class ChatService:
                         limit=limit,  # Use same limit per term
                         files=files,
                         only_valid=only_valid,
+                        languages=languages,
                         use_reranking=False,
                         debug=debug_collector is not None,
                     )
@@ -1836,6 +1852,7 @@ class ChatService:
         limit: int = 5,
         files: List[str] = None,
         only_valid: bool = False,
+        languages: List[str] = None,
         debug: bool = False,
         expand_query: bool = True,  # Default to True for per-category expansion
         expand_context: bool = False,
@@ -1981,6 +1998,7 @@ class ChatService:
                         limit=limit,
                         files=files,
                         only_valid=only_valid,
+                        languages=languages,
                         use_reranking=use_reranking,
                         category=category,
                         debug_collector=debug_collector,
@@ -1991,6 +2009,7 @@ class ChatService:
                         limit=limit,
                         files=files,
                         only_valid=only_valid,
+                        languages=languages,
                         use_reranking=use_reranking,
                     )
                 
@@ -2026,6 +2045,7 @@ class ChatService:
                 limit=limit,
                 files=files,
                 only_valid=only_valid,
+                languages=languages,
                 use_reranking=use_reranking,
             )
             
@@ -2678,12 +2698,14 @@ class UploadService:
             # Insert document metadata into PostgreSQL
             query = """
                 INSERT INTO documents (
-                    pdf_filename, json_filename, title, short_name, publication, year, author, 
-                    languages, is_valid, current_state, url, document_type, is_translation, valid_until
-                ) 
+                    pdf_filename, json_filename, title, short_name, publication, year, author,
+                    languages, is_valid, current_state, url, document_type, is_translation, valid_until,
+                    publisher, licence
+                )
                 VALUES (
-                    :fname, :json_fname, :title, :short_name, :publication, :year, :author, 
-                    :languages, :is_valid, :current_state, :url, :document_type, :is_translation, :valid_until
+                    :fname, :json_fname, :title, :short_name, :publication, :year, :author,
+                    :languages, :is_valid, :current_state, :url, :document_type, :is_translation, :valid_until,
+                    :publisher, :licence
                 )
                 RETURNING documents.id
             """
@@ -2718,6 +2740,8 @@ class UploadService:
                 "document_type": metadata.get("document_type", "other"),
                 "is_translation": metadata.get("is_translation", False),
                 "valid_until": valid_until_date,
+                "publisher": metadata.get("publisher", ""),
+                "licence": metadata.get("licence", ""),
             }]
             result = con.execute_sql(query, data)
             doc_id = result["data"][0][0]
@@ -2760,6 +2784,8 @@ class UploadService:
                 "publication": metadata.get("publication", ""),
                 "year": metadata.get("publication_year", 2024),
                 "author": metadata.get("author", ""),
+                "publisher": metadata.get("publisher", ""),
+                "licence": metadata.get("licence", ""),
                 "languages": languages if isinstance(languages, str) else ",".join(languages) if languages else "",
                 "url": metadata.get("url", ""),
                 "document_type": metadata.get("document_type", "other"),
@@ -2813,9 +2839,9 @@ class UploadService:
         con = self._get_db_connection()
         try:
             query = """
-                SELECT d.id, d.title, d.short_name, d.document_type, d.author, 
+                SELECT d.id, d.title, d.short_name, d.document_type, d.author,
                        d.year as publication_year, d.is_valid, d.valid_until,
-                       d.current_state
+                       d.current_state, d.publisher, d.licence
                 FROM documents d
                 ORDER BY d.id DESC
             """
@@ -2833,6 +2859,8 @@ class UploadService:
                     "is_valid": row[6] if row[6] is not None else True,
                     "valid_until": row[7].isoformat() if row[7] else None,
                     "current_state": row[8] or "",
+                    "publisher": row[9] or "",
+                    "licence": row[10] or "",
                     "chunk_count": 0,
                 }
                 
@@ -2862,10 +2890,10 @@ class UploadService:
         con = self._get_db_connection()
         try:
             query = """
-                SELECT d.id, d.title, d.short_name, d.document_type, d.author, 
+                SELECT d.id, d.title, d.short_name, d.document_type, d.author,
                        d.publication, d.year as publication_year, d.url, d.languages,
                        d.is_translation, d.is_valid, d.valid_until, d.current_state,
-                       d.date_created, d.date_modified
+                       d.date_created, d.date_modified, d.publisher, d.licence
                 FROM documents d
                 WHERE d.id = :doc_id
             """
@@ -2892,6 +2920,8 @@ class UploadService:
                 "current_state": row[12] or "",
                 "date_created": row[13].isoformat() if row[13] else None,
                 "date_modified": row[14].isoformat() if row[14] else None,
+                "publisher": row[15] or "",
+                "licence": row[16] or "",
                 "chunk_count": 0,
                 "keywords": [],
             }
@@ -2942,6 +2972,8 @@ class UploadService:
                 "author": "author",
                 "publication": "publication",
                 "publication_year": "year",
+                "publisher": "publisher",
+                "licence": "licence",
                 "url": "url",
                 "languages": "languages",
                 "is_translation": "is_translation",
@@ -3041,6 +3073,10 @@ class UploadService:
                         payload_updates["valid_until"] = NO_EXPIRATION_TIMESTAMP
                 else:
                     payload_updates["valid_until"] = NO_EXPIRATION_TIMESTAMP
+            if "publisher" in updates:
+                payload_updates["publisher"] = updates["publisher"] or ""
+            if "licence" in updates:
+                payload_updates["licence"] = updates["licence"] or ""
             if "keywords" in updates:
                 payload_updates["keywords"] = updates["keywords"] or []
             

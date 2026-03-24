@@ -188,6 +188,7 @@ async def search(
             limit=filters.limit if hasattr(filters, 'limit') else 10,
             files=filters.files if hasattr(filters, 'files') else None,
             only_valid=filters.only_valid if hasattr(filters, 'only_valid') else False,
+            languages=filters.languages if hasattr(filters, 'languages') else None,
         )
         
         return SearchResponse(
@@ -222,7 +223,8 @@ async def chat(
         limit = filters.limit if hasattr(filters, 'limit') else 10
         files = filters.files if hasattr(filters, 'files') else None
         only_valid = filters.only_valid if hasattr(filters, 'only_valid') else False
-        
+        languages = filters.languages if hasattr(filters, 'languages') else None
+
         # Always use parallel extraction mode
         mode = "PARALLEL"
         if request.expand_query:
@@ -232,12 +234,13 @@ async def chat(
         if request.use_reranking:
             mode += "+RERANKING"
         logger.info(f"Using {mode} extraction mode for query: {request.query}")
-        
+
         result = await service.chat_parallel(
             query=request.query,
             limit=limit,
             files=files,
             only_valid=only_valid,
+            languages=languages,
             debug=request.debug,
             expand_query=request.expand_query,
             expand_context=request.expand_context,
@@ -357,6 +360,8 @@ async def upload_document(
     author: str = Form(""),
     publication: str = Form(""),
     publication_year: int = Form(2024),
+    publisher: str = Form(""),
+    licence: str = Form(""),
     languages: str = Form(""),  # Comma-separated
     is_translation: bool = Form(False),
     keywords: str = Form(""),   # Comma-separated
@@ -384,13 +389,15 @@ async def upload_document(
             "author": author,
             "publication": publication,
             "publication_year": publication_year,
+            "publisher": publisher,
+            "licence": licence,
             "languages": lang_list,
             "is_translation": is_translation,
             "keywords": kw_list,
             "is_valid": is_valid,
             "valid_until": valid_until,
         }
-        
+
         result = service.upload_document(
             pdf_bytes=pdf_bytes,
             filename=file.filename,
@@ -413,6 +420,8 @@ async def upload_document_stream(
     author: str = Form(""),
     publication: str = Form(""),
     publication_year: int = Form(2024),
+    publisher: str = Form(""),
+    licence: str = Form(""),
     languages: str = Form(""),  # Comma-separated
     is_translation: bool = Form(False),
     keywords: str = Form(""),   # Comma-separated
@@ -440,13 +449,15 @@ async def upload_document_stream(
         "author": author,
         "publication": publication,
         "publication_year": publication_year,
+        "publisher": publisher,
+        "licence": licence,
         "languages": lang_list,
         "is_translation": is_translation,
         "keywords": kw_list,
         "is_valid": is_valid,
         "valid_until": valid_until,
     }
-    
+
     # Progress queue for communication between threads
     progress_queue = queue.Queue()
     result_holder = {"result": None, "error": None}
