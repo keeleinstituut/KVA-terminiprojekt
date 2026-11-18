@@ -182,7 +182,10 @@ class DataHandler:
                 else:
                     self.metadata[name] = []
             elif name == "filename":
-                self.metadata[name] = widget.placeholder
+                # Read straight from the file input: the placeholder binding
+                # breaks after "Uus fail", which left the filename empty and
+                # made the backend reject the upload (422/400).
+                self.metadata[name] = self.pdf_input.filename or widget.placeholder or "document.pdf"
             elif name == "valid_until":
                 # DatePicker returns date object or None
                 self.metadata[name] = field_input
@@ -234,6 +237,15 @@ class DataHandler:
                         data=form_data,
                         files=files,
                     ) as response:
+                        if response.status_code != 200:
+                            response.read()
+                            try:
+                                detail = response.json().get("detail", response.text)
+                            except Exception:
+                                detail = response.text
+                            raise RuntimeError(
+                                f"Server keeldus failist (HTTP {response.status_code}): {detail}"
+                            )
                         final_result = None
                         for line in response.iter_lines():
                             if line.startswith("data: "):
@@ -276,8 +288,8 @@ class DataHandler:
                                 )
                         else:
                             self.alert_pane.param.update(
-                                object="Üleslaadimine lõpetatud",
-                                alert_type="success",
+                                object="Server ei kinnitanud üleslaadimist. Kontrolli allikate loendit.",
+                                alert_type="warning",
                                 visible=True,
                             )
                             
@@ -311,7 +323,9 @@ class DataHandler:
         
         for name, widget in self.user_input_widgets.items():
             if name == "filename":
-                widget.placeholder = ""
+                # Don't assign placeholder here: that unlinks it from
+                # pdf_input.filename. Resetting pdf_input below clears it.
+                pass
             elif isinstance(widget, pn.widgets.TextInput):
                 widget.value = ""
                 if hasattr(widget, 'value_input'):
