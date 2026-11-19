@@ -83,6 +83,18 @@ def create_app(guest_mode: bool = False):
     return create_template(guest_mode=guest_mode)
 
 
+# Per-session Panel config. Must run for EVERY session (this file does):
+# pn.config set in init_app is session-local and only reached the first one.
+# - browser telemetry script (served via --static-dirs kva-static=./static)
+# - visible notice when the websocket drops: Bokeh does not reconnect, so
+#   without it the page silently stops reacting to clicks.
+pn.config.js_files = {**pn.config.js_files, "kva_telemetry": "kva-static/kva-telemetry.js"}
+pn.config.notifications = True
+pn.config.ready_notification = None
+pn.config.disconnect_notification = (
+    "Ühendus serveriga katkes. Palun värskenda lehte (F5) ja proovi uuesti."
+)
+
 # Session handling
 username = pn.state.user
 guest_mode = username == "kylaline"

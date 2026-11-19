@@ -19,7 +19,7 @@ from qdrant_client.http.models import (
     FieldCondition, Filter, MatchAny, MatchValue, Range,
     Prefetch, FusionQuery, Fusion, SparseVector,
     PointStruct, Distance, VectorParams, SparseVectorParams,
-    SparseIndexParams
+    SparseIndexParams, PayloadSchemaType
 )
 
 # Sentinel value for "no expiration" - year 2100
@@ -153,9 +153,29 @@ class SearchService:
         port = int(os.getenv("QDRANT_PORT", "6333"))
         self.client = QdrantClient(host=host, port=port)
         obs.add(qdrant={"host": host, "port": port})
+        self._ensure_payload_indexes()
 
         self._initialized = True
     
+    def _ensure_payload_indexes(self) -> None:
+        """Index fields used in filters. Without the `title` index every
+        per-document count scanned the whole collection (~26 s for
+        /documents with 115 docs, blocking page loads)."""
+        try:
+            existing = self.client.get_collection(self.collection_name).payload_schema or {}
+            created = []
+            for field in ("title",):
+                if field not in existing:
+                    self.client.create_payload_index(
+                        self.collection_name, field_name=field,
+                        field_schema=PayloadSchemaType.KEYWORD, wait=True,
+                    )
+                    created.append(field)
+            obs.add(qdrant={"payload_indexes": sorted(set(existing) | set(created)),
+                            "indexes_created": created})
+        except Exception as e:
+            obs.add(failures={"payload_index": obs.trunc(str(e), 300)})
+
     def is_healthy(self) -> bool:
         """Check if the service is healthy."""
         try:

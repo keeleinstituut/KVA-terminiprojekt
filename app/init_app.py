@@ -17,18 +17,6 @@ from utils import observability as obs
 
 obs.setup("frontend")
 
-import panel as pn
-
-# Browser telemetry (served via --static-dirs kva-static=./static) and a
-# visible notice when the websocket drops: Bokeh does not reconnect, so
-# without it the page silently stops reacting to clicks.
-pn.config.js_files["kva_telemetry"] = "kva-static/kva-telemetry.js"
-pn.config.disconnect_notification = (
-    "Ühendus serveriga katkes. Palun värskenda lehte (F5) ja proovi uuesti."
-)
-pn.config.notifications = True
-pn.config.ready_notification = None
-
 # Disable parallelism for tokenizers
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
