@@ -2,7 +2,7 @@
 Pydantic schemas for API request/response models.
 """
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ============================================================================
@@ -15,7 +15,24 @@ from pydantic import BaseModel, Field
 # "inferred" = information derived from context about related concepts
 # "expanded" = found via query expansion (synonym/related term search)
 
-class Definition(BaseModel):
+class _SourcedItem(BaseModel):
+    """Base for LLM-produced items. The LLM often returns null for optional
+    fields (url, page, confidence); coerce null to the field default instead of
+    rejecting the whole TermEntry."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_to_default(cls, data):
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items()
+                    if not (v is None and k in cls.model_fields
+                            and not cls.model_fields[k].is_required())}
+            if data.get("page") is None and "page" in cls.model_fields:
+                data["page"] = 0
+        return data
+
+
+class Definition(_SourcedItem):
     """A single definition with source information."""
     text: str = Field(..., description="The definition text")
     source: str = Field(..., description="Document title")
@@ -24,7 +41,7 @@ class Definition(BaseModel):
     confidence: str = Field(default="direct", description="Match confidence: direct, strong, inferred, expanded")
 
 
-class RelatedTerm(BaseModel):
+class RelatedTerm(_SourcedItem):
     """A related term with its relationship type and source."""
     term: str = Field(..., description="The related term")
     relation_type: str = Field(..., description="Type of relation: synonym, broader, narrower, abbreviation, other")
@@ -34,7 +51,7 @@ class RelatedTerm(BaseModel):
     confidence: str = Field(default="direct", description="Match confidence: direct, strong, inferred, expanded")
 
 
-class UsageEvidence(BaseModel):
+class UsageEvidence(_SourcedItem):
     """A usage example/context with source information."""
     text: str = Field(..., description="The contextual paragraph")
     source: str = Field(..., description="Document title")

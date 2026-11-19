@@ -530,6 +530,7 @@ class SearchService:
         """Perform hybrid search with RRF fusion."""
         obs.incr("qdrant_hybrid_searches")
         
+        t0 = time.perf_counter()
         # Encode dense vector
         dense_vector = self.dense_model.encode(
             query_prompt + query,
@@ -538,6 +539,7 @@ class SearchService:
         
         # Encode sparse vector
         sparse_vector = self._encode_sparse(query)
+        t1 = time.perf_counter()
         
         # Hybrid search with prefetch and RRF fusion
         results = self.client.query_points(
@@ -560,6 +562,9 @@ class SearchService:
             limit=limit,
             timeout=100,
         )
+        # Summed over all (parallel) searches in the request: CPU vs DB split.
+        obs.incr("embed_ms_total", round((t1 - t0) * 1000))
+        obs.incr("qdrant_ms_total", round((time.perf_counter() - t1) * 1000))
         
         return self._format_results(results.points)
     
@@ -731,7 +736,9 @@ class SearchService:
         
         # Get reranking scores
         try:
+            t0 = time.perf_counter()
             rerank_scores = self.reranker.predict(pairs, show_progress_bar=False)
+            obs.incr("rerank_ms_total", round((time.perf_counter() - t0) * 1000))
             
             # Add rerank scores to results
             for i, result in enumerate(results):
@@ -1458,6 +1465,7 @@ class ChatService:
         This ensures we have enough material to find the best results.
         """
         fetch_limit = limit * 2  # Fetch more than we need
+        t_start = time.perf_counter()
         
         # Step 1: Search with original query (fetch more)
         # Use debug mode to get raw Qdrant results
@@ -1522,6 +1530,7 @@ class ChatService:
         combined = original_results.copy()
         combined.extend(expanded_results)
         
+        t_searched = time.perf_counter()
         # Step 4: Rerank or sort by score
         mode_used = "none"
         if use_reranking and self.search_service.reranking_enabled and len(combined) > 0:
@@ -1542,6 +1551,8 @@ class ChatService:
             "returned": len(final_results),
             "ranking": mode_used,
             "fetch_limit": fetch_limit,
+            "search_ms": round((t_searched - t_start) * 1000),
+            "rerank_ms": round((time.perf_counter() - t_searched) * 1000),
         }})
         
         # Report to debug collector if provided
