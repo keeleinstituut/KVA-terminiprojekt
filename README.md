@@ -132,3 +132,47 @@ curl http://localhost:8000/health | jq '.reranking_enabled, .reranker_model'
 ```
 
 **Märkus:** Reranking lisab igale päringule viivise (sõltuvalt mudelist), aga parandab tulemuste kvaliteeti märkimisväärselt.
+
+## Logid ja telemeetria
+
+Kõik teenused kirjutavad stdout'i **ühe JSON-rea sündmuse kohta** (*wide event*):
+üks rida päringu või kasutaja tegevuse kohta, kõik kontekstiväljad koos.
+Ühised väljad: `ts`, `level` (`info`/`error`), `service` (`frontend`/`backend`),
+`deployment` (`riigikaitse`/`siseturvalisus`), `version` (git commit),
+`event`, `outcome`, `duration_ms`, `trace_id`, `user`, `session_id`.
+
+Frontendi tegevus ja selle käivitatud backendi päring jagavad sama `trace_id`-d.
+Brauseri sündmused (`browser.*`) seotakse sessiooniga `session_id` kaudu.
+
+| Sündmus | Kus | Sisu |
+|---|---|---|
+| `session.start` / `session.end` | frontend | kasutaja, sessioon, kestus |
+| `upload.file_selected`, `upload.submit` | frontend | fail, suurus, mida kasutaja nägi (`shown`) |
+| `chat.query`, `filter.*`, `document.*`, `prompt.update` | frontend | tegevuse andmed |
+| `http.request` | backend | iga päring; 4xx põhjus väljal `rejection` |
+| `upload.process` | backend | lehed, lõigud, etappide ajad, `outcome` (`success`, `duplicate_filename`, `no_text`, `error`) |
+| `browser.ws_close`, `browser.js_error`, `browser.disabled_click`, `browser.file_chosen`, ... | brauser → backend `/telemetry` | mis brauseris juhtus |
+
+Brauseri skript on `app/static/kva-telemetry.js`; see saadab sündmused aadressile
+`<prefix>/api/telemetry`, mille nginx suunab backendi `/telemetry` otspunkti.
+
+Näited (serveris):
+```bash
+B=kva-terminiprojekt-deployments_backend_1; F=kva-terminiprojekt-deployments_frontend_1
+logs() { docker logs --since "${2:-24h}" "$1" 2>&1 | grep '^{'; }
+
+# Ebaõnnestunud üleslaadimised (frontendi vaade: mida kasutaja nägi)
+logs $F | jq -c 'select(.event=="upload.submit" and .outcome!="success") | {ts,user,outcome,upload,shown}'
+
+# Kogu lugu ühe trace_id järgi, mõlemast teenusest
+T=<trace_id>; { logs $F; logs $B; } | jq -c "select(.trace_id==\"$T\")" | sort
+
+# Ühe sessiooni kõik sündmused, sh brauserist (nt katkenud websocket)
+S=<session_id>; { logs $F; logs $B; } | jq -c "select(.session_id==\"$S\")" | sort
+
+# Kõik vead
+{ logs $F; logs $B; } | jq -c 'select(.level=="error") | {ts,service,event,error}'
+```
+
+Tase: `LOG_LEVEL` (vaikimisi `INFO`). Trace'ide eksport: kui `OTEL_EXPORTER_OTLP_ENDPOINT`
+on seatud, saadetakse span'id OTLP kaudu kollektorisse; muidu on `trace_id` ainult logides.

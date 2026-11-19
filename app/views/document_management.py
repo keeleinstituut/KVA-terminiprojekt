@@ -2,8 +2,6 @@
 Document Management View - List, edit, and delete documents with Qdrant sync.
 """
 import asyncio
-import logging
-import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -11,11 +9,9 @@ import httpx
 import panel as pn
 import param
 
-logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
+from app.telemetry import (backend_client, backend_client_sync, describe_http_error,
+                           ui_event, ui_log)
 
-# Backend API URL
-BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 
 # Layout constants
 FORM_WIDTH = 300
@@ -56,7 +52,7 @@ class DocumentManagementView(param.Parameterized):
             else:
                 self._load_documents_sync()
         except Exception as e:
-            logger.warning(f"Could not load documents on init: {e}")
+            ui_log("documents.list", outcome="error", trigger="init", error=describe_http_error(e))
 
     def _create_widgets(self):
         """Create UI widgets."""
@@ -192,34 +188,39 @@ class DocumentManagementView(param.Parameterized):
     def _load_documents_sync(self):
         """Load documents from backend (synchronous)."""
         self.loading.value = True
-        try:
-            with httpx.Client(timeout=30.0) as client:
-                response = client.get(f"{BACKEND_URL}/documents")
-                response.raise_for_status()
-                self._process_documents_response(response.json())
-        except httpx.ConnectError:
-            logger.warning("Cannot connect to backend")
-        except Exception as e:
-            logger.error(f"Error loading documents: {e}")
-        finally:
-            self.loading.value = False
+        with ui_event("documents.list", trigger="init") as ev:
+            try:
+                with backend_client_sync(timeout=30.0) as client:
+                    response = client.get("/documents")
+                    response.raise_for_status()
+                    self._process_documents_response(response.json())
+                    ev.add(documents=len(self.documents))
+            except Exception as e:
+                ev.set_error(e)
+                ev.add(backend_error=describe_http_error(e))
+            finally:
+                self.loading.value = False
 
     async def _load_documents(self):
         """Load documents from backend (async)."""
         self.loading.value = True
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(f"{BACKEND_URL}/documents")
-                response.raise_for_status()
-                self._process_documents_response(response.json())
-                self._show_alert(f"{len(self.documents)} dokumenti", "success", auto_hide=True)
-        except httpx.ConnectError:
-            self._show_alert("Ei saa ühendust serveriga", "danger")
-        except Exception as e:
-            logger.error(f"Error loading documents: {e}")
-            self._show_alert(f"Viga: {str(e)}", "danger")
-        finally:
-            self.loading.value = False
+        with ui_event("documents.list", trigger="refresh") as ev:
+            try:
+                async with backend_client(timeout=30.0) as client:
+                    response = await client.get("/documents")
+                    response.raise_for_status()
+                    self._process_documents_response(response.json())
+                    ev.add(documents=len(self.documents))
+                    self._show_alert(f"{len(self.documents)} dokumenti", "success", auto_hide=True)
+            except httpx.ConnectError as e:
+                ev.set_error(e, reason="backend unreachable")
+                self._show_alert("Ei saa ühendust serveriga", "danger")
+            except Exception as e:
+                ev.set_error(e)
+                ev.add(backend_error=describe_http_error(e))
+                self._show_alert(f"Viga: {str(e)}", "danger")
+            finally:
+                self.loading.value = False
 
     def _process_documents_response(self, data: dict):
         """Process documents response and update table."""
@@ -260,12 +261,13 @@ class DocumentManagementView(param.Parameterized):
     async def _load_document_details(self, doc_id: int) -> Optional[Dict[str, Any]]:
         """Load single document details."""
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{BACKEND_URL}/documents/{doc_id}")
+            async with backend_client(timeout=10.0) as client:
+                response = await client.get(f"/documents/{doc_id}")
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"Error loading document {doc_id}: {e}")
+            ui_log("document.details", outcome="error", document_id=doc_id,
+                   error=describe_http_error(e))
             return None
 
     # =========================================================================
@@ -339,6 +341,10 @@ class DocumentManagementView(param.Parameterized):
         """Send document updates to backend."""
         if not self.selected_doc_id:
             return
+        with ui_event("document.update", document_id=self.selected_doc_id) as ev:
+            await self._save_document_inner(ev)
+
+    async def _save_document_inner(self, ev):
         
         self.loading.value = True
         self._hide_alert()
@@ -367,9 +373,10 @@ class DocumentManagementView(param.Parameterized):
                 "valid_until": valid_until,
             }
             
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            ev.add(changed_fields=sorted(k for k, v in payload.items() if v is not None))
+            async with backend_client(timeout=60.0) as client:
                 response = await client.put(
-                    f"{BACKEND_URL}/documents/{self.selected_doc_id}",
+                    f"/documents/{self.selected_doc_id}",
                     json=payload,
                 )
                 response.raise_for_status()
@@ -380,12 +387,16 @@ class DocumentManagementView(param.Parameterized):
                     self.edit_form.visible = False
                     await self._load_documents()
                 else:
+                    ev.set_outcome("error")
+                    ev.add(backend_message=result.get("message"))
                     self._show_alert(result.get("message", "Viga"), "danger")
-                    
-        except httpx.ConnectError:
+
+        except httpx.ConnectError as e:
+            ev.set_error(e, reason="backend unreachable")
             self._show_alert("Ei saa ühendust serveriga", "danger")
         except Exception as e:
-            logger.error(f"Error saving document: {e}")
+            ev.set_error(e)
+            ev.add(backend_error=describe_http_error(e))
             self._show_alert(f"Viga: {str(e)}", "danger")
         finally:
             self.loading.value = False
@@ -431,13 +442,17 @@ class DocumentManagementView(param.Parameterized):
         """Delete document."""
         if not self.selected_doc_id:
             return
+        with ui_event("document.delete", document_id=self.selected_doc_id) as ev:
+            await self._delete_document_inner(ev)
+
+    async def _delete_document_inner(self, ev):
         
         self.loading.value = True
         self._hide_alert()
         
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.delete(f"{BACKEND_URL}/documents/{self.selected_doc_id}")
+            async with backend_client(timeout=60.0) as client:
+                response = await client.delete(f"/documents/{self.selected_doc_id}")
                 response.raise_for_status()
                 result = response.json()
                 
@@ -448,12 +463,16 @@ class DocumentManagementView(param.Parameterized):
                     self.delete_btn.disabled = True
                     await self._load_documents()
                 else:
+                    ev.set_outcome("error")
+                    ev.add(backend_message=result.get("message"))
                     self._show_alert(result.get("message", "Viga"), "danger")
-                    
-        except httpx.ConnectError:
+
+        except httpx.ConnectError as e:
+            ev.set_error(e, reason="backend unreachable")
             self._show_alert("Ei saa ühendust serveriga", "danger")
         except Exception as e:
-            logger.error(f"Error deleting document: {e}")
+            ev.set_error(e)
+            ev.add(backend_error=describe_http_error(e))
             self._show_alert(f"Viga: {str(e)}", "danger")
         finally:
             self.loading.value = False

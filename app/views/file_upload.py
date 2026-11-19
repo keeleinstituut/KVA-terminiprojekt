@@ -1,16 +1,12 @@
 import collections
 import copy
-import logging
-import os
+import json
 
 import httpx
 import panel as pn
 
-logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
-
-# Backend API URL
-BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
+from app.telemetry import backend_client, ui_event, ui_log
+from utils import observability as obs
 
 BUTTON_WIDTH = 125
 INPUT_WIDTH = 300
@@ -120,6 +116,9 @@ class DataHandler:
         )
         self.submit_button.on_click(self.refresh_metadata)
         self.new_entry_button.on_click(self.new_input)
+        # Re-enable "Salvesta" whenever a new file arrives; previously it
+        # stayed disabled after an upload until "Uus fail" was clicked.
+        self.pdf_input.param.watch(self._on_file_selected, "value")
 
         self.alert_pane = pn.pane.Alert(
             object="Sisesta fail!",
@@ -156,13 +155,16 @@ class DataHandler:
         self.page_layout = pn.Row(left_column, right_column)
         super().__init__(**params)
 
-    def refresh_metadata(self, event) -> None:
-        """ Updates the metadata dictionary with the user input values and uploads via backend API. """
-        self.submit_button.disabled = True
-        self.new_entry_button.disabled = True
+    def _on_file_selected(self, event) -> None:
+        """A (new) file arrived from the browser: allow saving it."""
+        if event.new is None:
+            return
+        ui_log("upload.file_selected",
+               upload={"filename": self.pdf_input.filename, "size_bytes": len(event.new)})
+        self.submit_button.disabled = False
         self.alert_pane.param.update(visible=False)
-        logger.info("Saving triggered")
-        
+
+    def _collect_metadata(self) -> None:
         for name, widget in self.user_input_widgets.items():
             field_input = widget.value
             if name == "is_valid":
@@ -197,128 +199,132 @@ class DataHandler:
             else:
                 self.metadata[name] = field_input
 
-        if self.pdf_input.value:
-            # Show progress indicator
-            self.progress_bar.param.update(visible=True, value=0)
-            self.status_text.param.update(
-                object="**Üleslaadimine algab...**",
-                visible=True,
-            )
-            
-            try:
-                # Prepare valid_until for API (as string or empty)
-                valid_until_str = ""
-                if self.metadata.get("valid_until"):
-                    valid_until_str = self.metadata["valid_until"].strftime("%Y-%m-%d")
-                
-                # Use streaming endpoint with SSE for progress
-                form_data = {
-                    "title": self.metadata.get("title", ""),
-                    "short_name": self.metadata.get("short_name", ""),
-                    "document_type": self.metadata.get("document_type", ""),
-                    "author": self.metadata.get("author", ""),
-                    "publication": self.metadata.get("publication", ""),
-                    "publication_year": str(self.metadata.get("publication_year", 2024)),
-                    "url": self.metadata.get("url", ""),
-                    "languages": ",".join(self.metadata.get("languages", [])),
-                    "is_translation": str(self.metadata.get("is_translation", False)).lower(),
-                    "keywords": ",".join(self.metadata.get("keywords", [])),
-                    "is_valid": str(self.metadata.get("is_valid", True)).lower(),
-                    "valid_until": valid_until_str,
-                }
-                
-                files = {"file": (self.metadata["filename"], self.pdf_input.value, "application/pdf")}
-                
-                # Stream the response to get progress updates
-                with httpx.Client(timeout=600.0) as client:
-                    with client.stream(
-                        "POST",
-                        f"{BACKEND_URL}/documents/upload-stream",
-                        data=form_data,
-                        files=files,
-                    ) as response:
-                        if response.status_code != 200:
-                            response.read()
-                            try:
-                                detail = response.json().get("detail", response.text)
-                            except Exception:
-                                detail = response.text
-                            raise RuntimeError(
-                                f"Server keeldus failist (HTTP {response.status_code}): {detail}"
-                            )
-                        final_result = None
-                        for line in response.iter_lines():
-                            if line.startswith("data: "):
-                                try:
-                                    import json
-                                    data = json.loads(line[6:])
-                                    stage = data.get("stage", "")
-                                    percentage = data.get("percentage", 0)
-                                    message = data.get("message", "")
-                                    
-                                    # Update progress bar
-                                    if percentage >= 0:
-                                        self.progress_bar.value = percentage
-                                    self.status_text.object = f"**{message}**"
-                                    
-                                    # Check for completion
-                                    if stage in ("complete", "error"):
-                                        final_result = data
-                                        break
-                                except Exception as parse_err:
-                                    logger.warning(f"Parse error: {parse_err}")
-                        
-                        # Handle final result
-                        self.progress_bar.param.update(visible=False)
-                        self.status_text.param.update(visible=False)
-                        
-                        if final_result:
-                            if final_result.get("status") == "error" or final_result.get("stage") == "error":
-                                self.alert_pane.param.update(
-                                    object=final_result.get("message", "Üleslaadimine ebaõnnestus"),
-                                    alert_type="warning",
-                                    visible=True,
-                                )
-                            else:
-                                msg = final_result.get("message", "Fail edukalt üles laetud!")
-                                self.alert_pane.param.update(
-                                    object=f"Edukalt üles laetud: {msg}",
-                                    alert_type="success",
-                                    visible=True,
-                                )
-                        else:
-                            self.alert_pane.param.update(
-                                object="Server ei kinnitanud üleslaadimist. Kontrolli allikate loendit.",
-                                alert_type="warning",
-                                visible=True,
-                            )
-                            
-            except httpx.ConnectError:
-                logger.error("Cannot connect to backend")
-                self.progress_bar.param.update(visible=False)
-                self.status_text.param.update(visible=False)
-                self.alert_pane.param.update(
-                    object="Ei saa ühendust serveriga!",
-                    alert_type="warning",
-                    visible=True,
-                )
-            except Exception as e:
-                logger.error(f"Upload error: {e}")
-                self.progress_bar.param.update(visible=False)
-                self.status_text.param.update(visible=False)
-                self.alert_pane.param.update(
-                    object=f"Viga: {str(e)}",
-                    alert_type="warning",
-                    visible=True,
-                )
-        else:
-            self.alert_pane.param.update(visible=True)
+    def _show_result(self, ev, alert_type: str, message: str) -> None:
+        """Show the outcome to the user and record exactly what they saw."""
+        self.progress_bar.param.update(visible=False)
+        self.status_text.param.update(visible=False)
+        self.alert_pane.param.update(object=message, alert_type=alert_type, visible=True)
+        ev.add(shown={"alert": alert_type, "message": obs.trunc(message, 300)})
 
-        self.new_entry_button.disabled = False
+    async def refresh_metadata(self, event) -> None:
+        """Upload the selected PDF with its metadata via the backend.
+
+        Async so the Panel server keeps serving other sessions while the
+        backend processes the file (that can take minutes).
+        """
+        self.submit_button.disabled = True
+        self.new_entry_button.disabled = True
+        self.alert_pane.param.update(visible=False)
+        self._collect_metadata()
+
+        file_bytes = self.pdf_input.value
+        with ui_event("upload.submit", upload={
+            "filename": self.metadata.get("filename"),
+            "size_bytes": len(file_bytes) if file_bytes else 0,
+            "title": obs.trunc(self.metadata.get("title", ""), 200),
+            "document_type": self.metadata.get("document_type"),
+            "languages": ",".join(self.metadata.get("languages", [])),
+            "year": self.metadata.get("publication_year"),
+        }) as ev:
+            try:
+                if not file_bytes:
+                    ev.set_outcome("no_file")
+                    self._show_result(ev, "warning", "Sisesta fail!")
+                    self.submit_button.disabled = False
+                    return
+                await self._upload(ev, file_bytes)
+            finally:
+                self.new_entry_button.disabled = False
+
+    async def _upload(self, ev, file_bytes: bytes) -> None:
+        self.progress_bar.param.update(visible=True, value=0)
+        self.status_text.param.update(object="**Üleslaadimine algab...**", visible=True)
+
+        valid_until_str = ""
+        if self.metadata.get("valid_until"):
+            valid_until_str = self.metadata["valid_until"].strftime("%Y-%m-%d")
+
+        form_data = {
+            "title": self.metadata.get("title", ""),
+            "short_name": self.metadata.get("short_name", ""),
+            "document_type": self.metadata.get("document_type", ""),
+            "author": self.metadata.get("author", ""),
+            "publication": self.metadata.get("publication", ""),
+            "publication_year": str(self.metadata.get("publication_year", 2024)),
+            "url": self.metadata.get("url", ""),
+            "languages": ",".join(self.metadata.get("languages", [])),
+            "is_translation": str(self.metadata.get("is_translation", False)).lower(),
+            "keywords": ",".join(self.metadata.get("keywords", [])),
+            "is_valid": str(self.metadata.get("is_valid", True)).lower(),
+            "valid_until": valid_until_str,
+        }
+        files = {"file": (self.metadata["filename"], file_bytes, "application/pdf")}
+
+        final_result = None
+        last_stage = None
+        try:
+            async with backend_client(timeout=600.0) as client:
+                async with client.stream("POST", "/documents/upload-stream",
+                                         data=form_data, files=files) as response:
+                    ev.add(http_status=response.status_code)
+                    if response.status_code != 200:
+                        await response.aread()
+                        try:
+                            detail = response.json().get("detail", response.text)
+                        except Exception:
+                            detail = response.text
+                        ev.set_outcome("rejected")
+                        ev.add(rejection=obs.trunc(str(detail), 500))
+                        self._show_result(ev, "warning",
+                                          f"Server keeldus failist (HTTP {response.status_code}): {detail}")
+                        return
+
+                    async for line in response.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        try:
+                            data = json.loads(line[6:])
+                        except ValueError as parse_err:
+                            ev.incr("sse_parse_errors")
+                            ev.add(sse_parse_error=obs.trunc(str(parse_err), 200))
+                            continue
+                        stage = data.get("stage", "")
+                        if stage != "keepalive":
+                            last_stage = stage
+                        percentage = data.get("percentage", 0)
+                        if percentage >= 0:
+                            self.progress_bar.value = percentage
+                        self.status_text.object = f"**{data.get('message', '')}**"
+                        if stage in ("complete", "error"):
+                            final_result = data
+                            break
+        except httpx.ConnectError as exc:
+            ev.set_error(exc, reason="backend unreachable")
+            self._show_result(ev, "warning", "Ei saa ühendust serveriga!")
+            return
+        except Exception as exc:
+            ev.set_error(exc)
+            self._show_result(ev, "warning", f"Viga: {str(exc)}")
+            return
+        finally:
+            ev.add(last_stage=last_stage)
+
+        if final_result is None:
+            ev.set_outcome("unconfirmed")
+            self._show_result(ev, "warning",
+                              "Server ei kinnitanud üleslaadimist. Kontrolli allikate loendit.")
+        elif final_result.get("status") == "error" or final_result.get("stage") == "error":
+            message = final_result.get("message", "Üleslaadimine ebaõnnestus")
+            ev.set_outcome("duplicate_filename" if "already exists" in message else "error")
+            ev.add(backend_message=obs.trunc(message, 300))
+            self._show_result(ev, "warning", message)
+        else:
+            ev.add(document_id=final_result.get("document_id"))
+            msg = final_result.get("message", "Fail edukalt üles laetud!")
+            self._show_result(ev, "success", f"Edukalt üles laetud: {msg}")
 
     def new_input(self, event) -> None:
         """ Resets the input fields to their default values for uploading a new file. """
-        logger.info("New input triggered")
         self.alert_pane.param.update(visible=False)
         
         for name, widget in self.user_input_widgets.items():

@@ -4,12 +4,14 @@ No heavy model loading here - all processing done by backend.
 """
 import asyncio
 import json
-import logging
 import os
 
 import httpx
 import panel as pn
 import param
+
+from app.telemetry import backend_client, describe_http_error, ui_event, ui_log
+from utils import observability as obs
 from panel.chat import ChatInterface, ChatMessage
 import pandas as pd
 
@@ -55,8 +57,6 @@ SEE_ALSO_CSS = """
 # Initialize Panel extension with perspective and our custom CSS
 pn.extension("perspective", raw_css=[SEE_ALSO_CSS])
 
-# Backend API URL
-BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 
 CONNECTION_PARAMS = {
     "host": os.getenv("PG_HOST"),
@@ -65,10 +65,6 @@ CONNECTION_PARAMS = {
     "password": os.getenv("PG_PASSWORD"),
     "db": os.getenv("PG_COLLECTION"),
 }
-
-# Configure logging
-logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
 
 # Load config.json to get reranking setting
 def load_reranking_config():
@@ -87,13 +83,13 @@ def load_reranking_config():
                 with open(config_path, 'r') as f:
                     config = json.load(f)
                     enabled = config.get('reranking', {}).get('enabled', False)
-                    logger.info(f"Loaded reranking config from {config_path}: enabled={enabled}")
+                    obs.add(reranking={"enabled": enabled, "config": config_path})
                     return enabled
             except Exception as e:
-                logger.warning(f"Failed to load config.json from {config_path}: {e}")
+                obs.add(failures={f"config:{config_path}": obs.trunc(str(e), 300)})
                 continue
-    
-    logger.warning("Could not find config.json, defaulting reranking to False")
+
+    obs.add(reranking={"enabled": False, "config": None})
     return False
 
 RERANKING_ENABLED = load_reranking_config()
@@ -104,8 +100,7 @@ class BackendClient:
     Client for communicating with the FastAPI backend.
     """
     
-    def __init__(self, base_url: str = BACKEND_URL):
-        self.base_url = base_url
+    def __init__(self):
         self.timeout = 120.0  # 2 minutes timeout for LLM calls
     
     async def search(
@@ -116,9 +111,9 @@ class BackendClient:
         only_valid: bool = False,
     ) -> dict:
         """Call the search endpoint."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with backend_client(timeout=self.timeout) as client:
             response = await client.post(
-                f"{self.base_url}/search",
+                "/search",
                 json={
                     "query": query,
                     "filters": {
@@ -145,9 +140,9 @@ class BackendClient:
         early_parallelization: bool = True,
     ) -> dict:
         """Call the chat endpoint (always uses parallel extraction mode)."""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with backend_client(timeout=self.timeout) as client:
             response = await client.post(
-                f"{self.base_url}/chat",
+                "/chat",
                 json={
                     "query": query,
                     "filters": {
@@ -169,8 +164,8 @@ class BackendClient:
     async def health_check(self) -> bool:
         """Check if backend is healthy."""
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{self.base_url}/health")
+            async with backend_client(timeout=5.0) as client:
+                response = await client.get("/health")
                 return response.status_code == 200
         except Exception:
             return False
@@ -278,7 +273,7 @@ class FilterActionHandler(param.Parameterized):
             )
             return keywords_df
         except Exception as e:
-            logger.error(e)
+            ui_log("filter.load_keywords", outcome="error", error=describe_http_error(e))
             return pd.DataFrame(columns=["keyword"])
 
     def load_files_from_db(self):
@@ -288,26 +283,23 @@ class FilterActionHandler(param.Parameterized):
             )
             return files_df
         except Exception as e:
-            logger.error(e)
+            ui_log("filter.load_files", outcome="error", error=describe_http_error(e))
             return pd.DataFrame(columns=["id", "title"])
 
     @param.depends("refresh_choices_button.value", watch=True)
     def refresh_selectors(self):
-        logger.info("Refreshing file selection")
         try:
             self.files_df = self.load_files_from_db()
             self.file_selector.options = list(self.files_df["title"])
             self.keywords_df = self.load_keywords_from_db()
             self.keyword_selector.options = list(self.keywords_df["keyword"])
-            logger.info("File selection refresh complete.")
         except Exception as e:
-            logger.error(e)
+            ui_log("filter.refresh", outcome="error", error=describe_http_error(e))
 
     @param.depends("keyword_selector.value", watch=True)
     def keyword_filtering(self):
         selected_kw_values = self.keyword_selector.value
         if selected_kw_values:
-            logger.info(selected_kw_values)
             self.con.establish_connection()
             try:
                 result = self.con.execute_sql(
@@ -320,8 +312,11 @@ class FilterActionHandler(param.Parameterized):
                 )
                 self.file_selector.options = selected_files
                 self.file_selector.value = selected_files
+                ui_log("filter.keywords", keywords=list(selected_kw_values)[:20],
+                       matching_files=len(selected_files))
             except Exception as e:
-                logger.error(e)
+                ui_log("filter.keywords", outcome="error", keywords=list(selected_kw_values)[:20],
+                       error=describe_http_error(e))
         else:
             self.refresh_selectors()
 
@@ -338,7 +333,13 @@ class FilterActionHandler(param.Parameterized):
             output_categories=self.output_categories_selector.value,
             early_parallelization=True,  # Always enabled
         )
-        logger.info(f"Filters applied: {self.filter_state.__dict__}")
+        ui_log("filter.apply", filters={
+            "files": len(self.filter_state.files or []),
+            "limit": self.filter_state.limit,
+            "only_valid": self.filter_state.only_valid,
+            "debug": self.filter_state.debug_mode,
+            "categories": self.filter_state.output_categories,
+        })
 
 
 def _format_debug_output(debug_info: dict) -> str:
@@ -729,7 +730,7 @@ def llm_view(guest_mode: bool = False):
     def create_see_also_handler(term: str, chat_interface):
         """Create a click handler for a See Also button."""
         def handler(event):
-            logger.info(f"See Also button clicked: {term}")
+            ui_log("chat.see_also_click", term=obs.trunc(term, 100))
             # Send the term as a new message to the chat
             chat_interface.send(
                 ChatMessage(
@@ -745,6 +746,10 @@ def llm_view(guest_mode: bool = False):
     # Chat callback - calls backend API
     async def chat_callback(contents: str, user: str, instance):
         """Handle chat messages by calling the backend API."""
+        with ui_event("chat.query", chat={"query": obs.trunc(contents)}) as ev:
+            return await _chat(contents, instance, ev)
+
+    async def _chat(contents: str, instance, ev):
         try:
             # Always parallel mode now
             mode = "parallel"
@@ -754,7 +759,13 @@ def llm_view(guest_mode: bool = False):
                 mode += "+context"
             if filter_state.use_reranking:
                 mode += "+reranking"
-            logger.info(f"Sending query to backend: {contents} (mode: {mode}, debug: {filter_state.debug_mode}, categories: {filter_state.output_categories})")
+            ev.add(chat={
+                "mode": mode,
+                "debug": filter_state.debug_mode,
+                "categories": filter_state.output_categories,
+                "files_filter": len(filter_state.files or []),
+                "limit": filter_state.limit,
+            })
             result = await backend_client.chat(
                 query=contents,
                 limit=filter_state.limit,
@@ -769,6 +780,8 @@ def llm_view(guest_mode: bool = False):
             )
             
             response = result["response"]
+            ev.add(chat={"response_chars": len(response or ""),
+                         "context_chunks": result.get("context_used")})
             
             # Add debug info if present
             if filter_state.debug_mode and result.get("debug_info"):
@@ -812,14 +825,15 @@ def llm_view(guest_mode: bool = False):
                 )
             
             return response
-        except httpx.ConnectError:
-            logger.error("Cannot connect to backend")
+        except httpx.ConnectError as e:
+            ev.set_error(e, reason="backend unreachable")
             return "❌ Ei saa ühendust serveriga. Palun proovi hiljem uuesti."
-        except httpx.TimeoutException:
-            logger.error("Backend timeout")
+        except httpx.TimeoutException as e:
+            ev.set_error(e, reason="backend timeout", outcome="timeout")
             return "⏱️ Päring võttis liiga kaua aega. Palun proovi uuesti."
         except Exception as e:
-            logger.error(f"Chat error: {e}")
+            ev.set_error(e)
+            ev.add(backend_error=describe_http_error(e))
             return f"❌ Viga: {str(e)}"
 
     # UI Components

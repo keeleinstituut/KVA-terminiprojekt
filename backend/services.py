@@ -5,7 +5,6 @@ Models are loaded ONCE at startup and reused for all requests.
 import asyncio
 import os
 import json
-import logging
 import time
 import uuid
 from datetime import datetime
@@ -29,8 +28,17 @@ from sentence_transformers import SentenceTransformer
 from sqlalchemy.exc import IntegrityError
 
 from utils.db_connection import Connection
+from utils import observability as obs
 
-logger = logging.getLogger("backend")
+
+
+def _record_llm_usage(response) -> None:
+    """Add token usage of one LLM call to the current wide event."""
+    obs.incr("llm_calls")
+    usage = getattr(response, "usage_metadata", None) or {}
+    if usage:
+        obs.incr("llm_input_tokens", int(usage.get("input_tokens", 0) or 0))
+        obs.incr("llm_output_tokens", int(usage.get("output_tokens", 0) or 0))
 
 
 class DebugCollector:
@@ -109,13 +117,10 @@ class SearchService:
         if self._initialized:
             return
             
-        logger.info("Initializing SearchService...")
-        
         # Load dense embedding model
         model_name = self.config["embeddings"]["embedding_model"]
-        logger.info(f"Loading dense model: {model_name}")
         self.dense_model = SentenceTransformer(model_name)
-        logger.info("Dense model loaded successfully")
+        obs.add(dense_model=model_name)
         
         # Load sparse model if hybrid search enabled
         hybrid_config = self.config.get("hybrid_search", {})
@@ -123,12 +128,11 @@ class SearchService:
             try:
                 from fastembed import SparseTextEmbedding
                 sparse_model_name = hybrid_config.get("sparse_model", "Qdrant/bm25")
-                logger.info(f"Loading sparse model: {sparse_model_name}")
                 self.sparse_model = SparseTextEmbedding(model_name=sparse_model_name)
                 self.hybrid_enabled = True
-                logger.info("Sparse model loaded successfully - hybrid search enabled")
+                obs.add(sparse_model=sparse_model_name)
             except Exception as e:
-                logger.warning(f"Failed to load sparse model: {e}")
+                obs.add(failures={"sparse_model": obs.trunc(str(e), 300)})
                 self.hybrid_enabled = False
         
         # Load reranker model if enabled
@@ -137,23 +141,20 @@ class SearchService:
             try:
                 from sentence_transformers import CrossEncoder
                 reranker_model_name = rerank_config.get("model", "BAAI/bge-reranker-v2-m3")
-                logger.info(f"Loading reranker model: {reranker_model_name}")
                 self.reranker = CrossEncoder(reranker_model_name, max_length=512)
                 self.reranking_enabled = True
-                logger.info("Reranker model loaded successfully - reranking enabled")
+                obs.add(reranker_model=reranker_model_name)
             except Exception as e:
-                logger.warning(f"Failed to load reranker model: {e}")
+                obs.add(failures={"reranker_model": obs.trunc(str(e), 300)})
                 self.reranking_enabled = False
         
         # Connect to Qdrant
         host = os.getenv("QDRANT_HOST", "localhost")
         port = int(os.getenv("QDRANT_PORT", "6333"))
-        logger.info(f"Connecting to Qdrant at {host}:{port}")
         self.client = QdrantClient(host=host, port=port)
-        logger.info("Connected to Qdrant successfully")
-        
+        obs.add(qdrant={"host": host, "port": port})
+
         self._initialized = True
-        logger.info("SearchService initialization complete")
     
     def is_healthy(self) -> bool:
         """Check if the service is healthy."""
@@ -411,7 +412,7 @@ class SearchService:
             return adjacent_chunks
             
         except Exception as e:
-            logger.warning(f"Failed to fetch adjacent chunks: {e}")
+            obs.add(failures={"adjacent_chunks": obs.trunc(str(e), 300)})
             return []
     
     def expand_context(
@@ -469,7 +470,7 @@ class SearchService:
         # Sort by title and page to keep context coherent
         expanded.sort(key=lambda x: (x.get("title", ""), x.get("page_number", 0)))
         
-        logger.info(f"Context expansion: {len(results)} original → {len(expanded)} with adjacent")
+        obs.add(context_expansion={"original": len(results), "expanded": len(expanded)})
         return expanded
     
     def _dense_search(
@@ -480,7 +481,7 @@ class SearchService:
         query_filter: Optional[Filter],
     ) -> List[Dict[str, Any]]:
         """Perform dense vector search."""
-        logger.info("Performing dense search")
+        obs.incr("qdrant_dense_searches")
         
         dense_vector = self.dense_model.encode(
             query_prompt + query,
@@ -507,7 +508,7 @@ class SearchService:
         query_filter: Optional[Filter],
     ) -> List[Dict[str, Any]]:
         """Perform hybrid search with RRF fusion."""
-        logger.info("Performing hybrid search")
+        obs.incr("qdrant_hybrid_searches")
         
         # Encode dense vector
         dense_vector = self.dense_model.encode(
@@ -560,7 +561,7 @@ class SearchService:
             - sparse_tokens: The sparse vector tokens/weights
         """
         import time
-        logger.info("Performing hybrid search with debug info")
+        obs.incr("qdrant_hybrid_searches")
         debug_info = {"type": "hybrid"}
         
         # Step 1: Encode dense vector
@@ -704,7 +705,6 @@ class SearchService:
         if top_k is None:
             top_k = len(results)
         
-        logger.info(f"Reranking {len(results)} results for query: {query[:50]}...")
         
         # Prepare query-document pairs for cross-encoder
         pairs = [(query, result["text"]) for result in results]
@@ -725,12 +725,13 @@ class SearchService:
             for result in reranked:
                 result["score"] = result["rerank_score"]
             
-            logger.info(f"Reranking complete. Top result score: {reranked[0]['rerank_score']:.4f}")
+            obs.incr("rerank_calls")
+            obs.incr("reranked_candidates", len(results))
             
             return reranked[:top_k]
             
         except Exception as e:
-            logger.error(f"Reranking failed: {e}")
+            obs.add(failures={"rerank": obs.trunc(str(e), 300)})
             return results[:top_k] if top_k else results
 
 
@@ -756,8 +757,6 @@ class ChatService:
         from langchain_anthropic import ChatAnthropic
         from langchain_openai import ChatOpenAI
         
-        logger.info("Initializing ChatService...")
-        
         model_name = self.config["llm"]["model"]
         temperature = self.config["llm"].get("temperature", 0)
         api_key = os.getenv("LLM_API_KEY")
@@ -777,7 +776,7 @@ class ChatService:
                 max_retries=2,
             )
         
-        logger.info(f"LLM initialized: {model_name}")
+        obs.add(llm_model=model_name, llm_initialized=self.llm is not None)
         self._initialized = True
     
     def _build_context(self, results: List[Dict[str, Any]]) -> str:
@@ -930,14 +929,12 @@ class ChatService:
                     # Case 1: This text is fully contained in a longer definition from same source
                     if self._is_contained_in(text, kept_text):
                         is_duplicate = True
-                        logger.debug(f"Removing definition (substring from same source): '{text[:50]}...'")
                         break
                     
                     # Case 2: Very high word overlap (>85%) from same source
                     similarity = self._text_similarity(text, kept_text)
                     if similarity > 0.85:
                         is_duplicate = True
-                        logger.debug(f"Removing definition (similar from same source {similarity:.0%}): '{text[:50]}...'")
                         break
                 else:
                     # From DIFFERENT sources - keep them!
@@ -946,7 +943,7 @@ class ChatService:
             if not is_duplicate:
                 kept.append(defn)
         
-        logger.info(f"Definitions: {len(definitions)} → {len(kept)} after deduplication")
+        obs.add(dedup={"definitions": {"before": len(definitions), "after": len(kept)}})
         return kept
 
     def _deduplicate_related_terms(self, related_terms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -982,7 +979,7 @@ class ChatService:
             # Keep the best one
             deduplicated.append(terms_sorted[0])
         
-        logger.info(f"Related terms: {len(related_terms)} → {len(deduplicated)} after deduplication")
+        obs.add(dedup={"related_terms": {"before": len(related_terms), "after": len(deduplicated)}})
         return deduplicated
 
     def _deduplicate_usage_evidence(self, usage_evidence: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1015,14 +1012,12 @@ class ChatService:
                     # Case 1: This quote is fully contained in a longer quote from same source
                     if self._is_contained_in(text, kept_text):
                         is_duplicate = True
-                        logger.debug(f"Removing usage example (substring from same source): '{text[:50]}...'")
                         break
                     
                     # Case 2: Very high word overlap from same source
                     similarity = self._text_similarity(text, kept_text)
                     if similarity > 0.85:
                         is_duplicate = True
-                        logger.debug(f"Removing usage example (similar from same source {similarity:.0%}): '{text[:50]}...'")
                         break
                 else:
                     # Different sources - keep them! 
@@ -1032,7 +1027,7 @@ class ChatService:
             if not is_duplicate:
                 kept.append(evidence)
         
-        logger.info(f"Usage evidence: {len(usage_evidence)} → {len(kept)} after deduplication")
+        obs.add(dedup={"usage_evidence": {"before": len(usage_evidence), "after": len(kept)}})
         return kept
     
     def _update_confidence_based_on_provenance(self, term_entry: Dict[str, Any], category_results_dict: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
@@ -1337,6 +1332,7 @@ class ChatService:
         
         try:
             response = self.llm.invoke(prompt_messages)
+            _record_llm_usage(response)
             
             # Log LLM output for debugging
             if debug_collector:
@@ -1374,7 +1370,7 @@ class ChatService:
                     "language": parsed.get("language", "unknown"),
                 }
         except Exception as e:
-            logger.warning(f"Query expansion failed for category {category}: {e}")
+            obs.add(failures={f"expansion.{category or 'all'}": obs.trunc(str(e), 300)})
         
         # Return just original on failure
         return {"original": query, "expanded": [], "language": "unknown"}
@@ -1406,14 +1402,17 @@ class ChatService:
         try:
             result = await loop.run_in_executor(
                 executor,
-                lambda: self._expand_query_sync(query, category, prompt_set_id, debug_collector)
+                obs.run_in_context(lambda: self._expand_query_sync(query, category, prompt_set_id, debug_collector))
             )
             duration_ms = (time.time() - start_time) * 1000
-            category_str = f" [{category}]" if category else ""
-            logger.info(f"✓ Query expanded{category_str}: {query} → +{len(result.get('expanded', []))} terms ({duration_ms:.0f}ms)")
+            obs.add(expansion={category or "all": {
+                "terms": len(result.get("expanded", [])),
+                "language": result.get("language"),
+                "duration_ms": round(duration_ms),
+            }})
             return result, duration_ms
         except Exception as e:
-            logger.error(f"Query expansion error for category {category}: {e}")
+            obs.add(failures={f"expansion.{category or 'all'}": obs.trunc(str(e), 300)})
             duration_ms = (time.time() - start_time) * 1000
             return {"original": query, "expanded": [], "language": "unknown"}, duration_ms
 
@@ -1461,7 +1460,6 @@ class ChatService:
         for r in original_results:
             r["_source"] = "original"
         
-        logger.info(f"[{category or 'search'}] Original search found {len(original_results)} results (fetch_limit={fetch_limit})")
         
         # Step 2: Search with each expanded term individually
         expanded_results = []
@@ -1497,9 +1495,8 @@ class ChatService:
                             expanded_results.append(r)
                             seen_in_original.add(key)
                 except Exception as e:
-                    logger.warning(f"Expanded search for '{term}' failed: {e}")
+                    obs.add(failures={f"expanded_search.{category or 'search'}": obs.trunc(str(e), 300)})
             
-            logger.info(f"[{category or 'search'}] Expanded search found {len(expanded_results)} additional results")
         
         # Step 3: Combine all results
         combined = original_results.copy()
@@ -1508,18 +1505,24 @@ class ChatService:
         # Step 4: Rerank or sort by score
         mode_used = "none"
         if use_reranking and self.search_service.reranking_enabled and len(combined) > 0:
-            logger.info(f"[{category or 'search'}] Reranking {len(combined)} combined results")
             combined = self.search_service._rerank(query, combined, top_k=None)
             mode_used = "reranking"
         else:
             # Sort by hybrid search score (descending)
             combined.sort(key=lambda x: x.get("score", 0), reverse=True)
-            logger.info(f"[{category or 'search'}] Sorted {len(combined)} combined results by score")
             mode_used = "score_sort"
         
         # Step 5: Keep only the best results (final limit)
         final_results = combined[:limit]
-        logger.info(f"[{category or 'search'}] Returning top {len(final_results)} results from {len(combined)} candidates")
+        obs.add(retrieval={category or "search": {
+            "original": len(original_results),
+            "expanded_terms": len(expanded_terms[:5]) if expanded_terms else 0,
+            "expanded_extra": len(expanded_results),
+            "candidates": len(combined),
+            "returned": len(final_results),
+            "ranking": mode_used,
+            "fetch_limit": fetch_limit,
+        }})
         
         # Report to debug collector if provided
         if debug_collector and category:
@@ -1571,6 +1574,7 @@ class ChatService:
     def _invoke_llm_sync(self, prompt_messages) -> str:
         """Synchronous LLM invocation for use in thread pool."""
         response = self.llm.invoke(prompt_messages)
+        _record_llm_usage(response)
         return response.content
     
     async def _extract_single(
@@ -1625,7 +1629,7 @@ class ChatService:
             # Run LLM call in thread pool to not block
             raw_response = await loop.run_in_executor(
                 executor,
-                self._invoke_llm_sync,
+                obs.run_in_context(self._invoke_llm_sync),
                 prompt_messages
             )
             
@@ -1644,11 +1648,15 @@ class ChatService:
             parsed = self._parse_extraction_json(raw_response, extraction_type)
             duration_ms = (time.time() - start_time) * 1000
             
-            logger.info(f"✓ {extraction_type} extraction completed in {duration_ms:.0f}ms")
+            obs.add(extraction={extraction_type: {
+                "duration_ms": round(duration_ms),
+                "response_chars": len(raw_response or ""),
+                "parsed": bool(parsed),
+            }})
             return (extraction_type, parsed, duration_ms, raw_response)
             
         except Exception as e:
-            logger.error(f"✗ {extraction_type} extraction failed: {e}")
+            obs.add(failures={f"extraction.{extraction_type}": obs.trunc(str(e), 300)})
             duration_ms = (time.time() - start_time) * 1000
             error_msg = str(e)
             if debug_collector:
@@ -1716,7 +1724,7 @@ class ChatService:
                             
             return parsed
         except json.JSONDecodeError:
-            logger.warning(f"Failed to parse {extraction_type} JSON")
+            obs.add(failures={f"parse.{extraction_type}": "invalid JSON from LLM"})
             return {}
     
     async def chat_parallel(
@@ -1764,9 +1772,6 @@ class ChatService:
         # Initialize debug collector if enabled
         debug_collector = DebugCollector() if debug else None
         
-        if debug:
-            logger.info(f"🔍 DEBUG MODE (PARALLEL) for query: {query}")
-        
         mode_str = "parallel"
         if expand_query:
             mode_str += "+per-category-expansion"
@@ -1774,7 +1779,7 @@ class ChatService:
             mode_str += "+context"
         if use_reranking:
             mode_str += "+reranking"
-        logger.info(f"🚀 Starting {mode_str.upper()} extraction for: {query}")
+        obs.add(pipeline={"mode": mode_str})
         
         # Step 1: Query received
         if debug_collector:
@@ -1846,7 +1851,7 @@ class ChatService:
                 expansion_result, expansion_duration = expansion_results[idx]
                 
                 if isinstance(expansion_result, Exception):
-                    logger.error(f"Expansion failed for {category}: {expansion_result}")
+                    obs.add(failures={f"expansion.{category}": obs.trunc(str(expansion_result), 300)})
                     expanded_terms = []
                     language = "unknown"
                 else:
@@ -1893,7 +1898,7 @@ class ChatService:
             search_executor = ThreadPoolExecutor(max_workers=len(categories_to_expand))
             loop = asyncio.get_event_loop()
             search_tasks = [
-                loop.run_in_executor(search_executor, search_for_category, category)
+                loop.run_in_executor(search_executor, obs.run_in_context(search_for_category), category)
                 for category in categories_to_expand
             ]
             search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
@@ -1902,7 +1907,7 @@ class ChatService:
             # Store results
             for idx, category in enumerate(categories_to_expand):
                 if isinstance(search_results[idx], Exception):
-                    logger.error(f"Search failed for {category}: {search_results[idx]}")
+                    obs.add(failures={f"search.{category}": obs.trunc(str(search_results[idx]), 300)})
                     category_results_dict[category] = []
                     category_contexts[category] = ""
                 else:
@@ -2037,7 +2042,7 @@ class ChatService:
         
         for result in extraction_results:
             if isinstance(result, Exception):
-                logger.error(f"Extraction failed: {result}")
+                obs.add(failures={"extraction": obs.trunc(str(result), 300)})
                 continue
             
             ext_type, parsed, duration, raw = result
@@ -2086,7 +2091,6 @@ class ChatService:
                 formatted_response
             )
         
-        logger.info(f"✅ Parallel extraction complete for: {query}")
         
         # Calculate total context chunks used
         total_context_chunks = sum(
@@ -2142,11 +2146,10 @@ class PromptService:
         if self._initialized:
             return
         
-        logger.info("Initializing PromptService...")
         self._refresh_cache()
         self._initialized = True
         total_prompts = sum(len(prompts) for prompts in self._prompts_cache.values())
-        logger.info(f"PromptService initialized with {len(self._sets_cache)} prompt sets, {total_prompts} prompts")
+        obs.add(prompt_sets=len(self._sets_cache), prompts=total_prompts)
     
     def _refresh_cache(self) -> None:
         """Refresh the prompt sets and prompts cache from database."""
@@ -2432,7 +2435,7 @@ class UploadService:
         total_chunks = len(all_chunks)
         report_progress("chunking", 100, 100, f"{total_chunks} tekstilõiku leitud")
 
-        logger.info(f"Creating embeddings for {total_chunks} chunks (batched)...")
+        stage_start = time.perf_counter()
 
         # Step 2: Batch encode all texts - with progress
         report_progress("embedding", 0, total_chunks, "Tihedate vektorite loomine...")
@@ -2452,6 +2455,9 @@ class UploadService:
             dense_vectors.extend(batch_vectors)
             report_progress("embedding", min(i + embed_batch_size, total_chunks), total_chunks, 
                           f"Tihedate vektorite loomine ({min(i + embed_batch_size, total_chunks)}/{total_chunks})...")
+
+        timings = {"embedding": round((time.perf_counter() - stage_start) * 1000)}
+        stage_start = time.perf_counter()
 
         # Batch encode sparse vectors if hybrid enabled
         sparse_vectors = None
@@ -2493,7 +2499,8 @@ class UploadService:
             ))
         
         # Step 4: Upload in batches with progress
-        logger.info(f"Uploading {len(points)} chunks to Qdrant...")
+        timings["sparse_and_points"] = round((time.perf_counter() - stage_start) * 1000)
+        stage_start = time.perf_counter()
         batch_size = 50  # Larger batches for upload
         uploaded = 0
         for i in range(0, len(points), batch_size):
@@ -2507,10 +2514,48 @@ class UploadService:
             report_progress("upload", uploaded, len(points), 
                           f"Qdrant'i üleslaadimine ({uploaded}/{len(points)})...")
         
+        timings["qdrant_upsert"] = round((time.perf_counter() - stage_start) * 1000)
+        obs.add(upload={"timings_ms": timings, "hybrid": sparse_vectors is not None})
+
         report_progress("done", len(points), len(points), "Valmis!")
         return len(points)
     
     def upload_document(
+        self,
+        pdf_bytes: bytes,
+        filename: str,
+        metadata: Dict[str, Any],
+        progress_callback: callable = None,
+    ) -> Dict[str, Any]:
+        """Upload a document, recorded as one `upload.process` wide event.
+
+        The event is separate from the HTTP request event so it is emitted
+        even if the client disconnects while processing continues. A summary
+        is also copied onto the request event (same trace_id).
+        """
+        parent = obs.current()
+        languages = metadata.get("languages", [])
+        with obs.event("upload.process", upload={
+            "filename": filename,
+            "size_bytes": len(pdf_bytes),
+            "title": obs.trunc(metadata.get("title", ""), 200),
+            "document_type": metadata.get("document_type"),
+            "languages": languages if isinstance(languages, str) else ",".join(languages),
+            "year": metadata.get("publication_year"),
+            "collection": self.collection_name,
+        }) as ev:
+            result = self._upload_document(pdf_bytes, filename, metadata, progress_callback)
+            if result.get("status") == "error" and ev.outcome in (None, "success"):
+                ev.set_outcome("error")
+                ev.fields.setdefault("error", {"reason": obs.trunc(result.get("message", ""), 500)})
+            summary = {k: ev.fields.get("upload", {}).get(k)
+                       for k in ("document_id", "pages", "chunks", "filename", "size_bytes")}
+            summary["outcome"] = ev.outcome or "success"
+        if parent is not None:
+            parent.add(upload=summary)
+        return result
+
+    def _upload_document(
         self,
         pdf_bytes: bytes,
         filename: str,
@@ -2558,7 +2603,7 @@ class UploadService:
                     ),
                  }
                 )
-                logger.info(f"Created collection: {self.collection_name}")
+                obs.add(upload={"created_collection": self.collection_name})
             
             report_progress("db", 5, 100, "Metaandmete salvestamine andmebaasi...")
             
@@ -2617,13 +2662,20 @@ class UploadService:
                 con.execute_sql(kw_query, kw_data)
             
             con.commit()
-            logger.info(f"Document {doc_id} metadata saved to PostgreSQL")
+            obs.add(upload={"document_id": doc_id})
             report_progress("db", 10, 100, "Metaandmed salvestatud")
             
             # Extract text from PDF
             report_progress("extract", 10, 100, "PDF-ist teksti ekstraheerimine...")
+            extract_start = time.perf_counter()
             content = self._extract_text_from_pdf(pdf_bytes)
-            logger.info(f"Extracted {len(content)} pages from PDF")
+            text_chars = sum(len(p["text"]) for p in content)
+            obs.add(upload={
+                "pages": len(content),
+                "text_chars": text_chars,
+                "empty_pages": sum(1 for p in content if not p["text"].strip()),
+                "timings_ms": {"extract": round((time.perf_counter() - extract_start) * 1000)},
+            })
             report_progress("extract", 15, 100, f"{len(content)} lehekülge ekstraheeritud")
             
             # Create embeddings and upload to Qdrant
@@ -2657,7 +2709,10 @@ class UploadService:
             }
             
             num_chunks = self._create_embeddings_and_upload(document_metadata, content, progress_callback)
-            logger.info(f"Uploaded {num_chunks} chunks to Qdrant")
+            obs.add(upload={"chunks": num_chunks})
+            if num_chunks == 0:
+                # Nothing searchable was stored (scanned PDF / no text layer).
+                obs.set_outcome("no_text")
             
             # Update status to uploaded
             con.execute_sql(
@@ -2674,6 +2729,7 @@ class UploadService:
             }
             
         except IntegrityError:
+            obs.set_outcome("duplicate_filename")
             con.session.rollback()
             con.close()
             return {
@@ -2682,7 +2738,7 @@ class UploadService:
                 "document_id": None,
             }
         except Exception as e:
-            logger.error(f"Upload error: {e}")
+            obs.set_error(e)
             con.session.rollback()
             con.close()
             return {
@@ -2740,7 +2796,7 @@ class UploadService:
             con.close()
             return documents
         except Exception as e:
-            logger.error(f"Error listing documents: {e}")
+            obs.set_error(e)
             con.close()
             return []
 
@@ -2805,7 +2861,7 @@ class UploadService:
             con.close()
             return doc
         except Exception as e:
-            logger.error(f"Error getting document {doc_id}: {e}")
+            obs.set_error(e)
             con.close()
             return None
 
@@ -2876,7 +2932,7 @@ class UploadService:
                 "message": f"Document updated, {chunks_updated} chunks synced",
             }
         except Exception as e:
-            logger.error(f"Error updating document {doc_id}: {e}")
+            obs.set_error(e)
             con.session.rollback()
             con.close()
             return {"status": "error", "message": str(e)}
@@ -2945,7 +3001,7 @@ class UploadService:
             
             return len(point_ids)
         except Exception as e:
-            logger.error(f"Error syncing to Qdrant: {e}")
+            obs.add(failures={"qdrant_sync": obs.trunc(str(e), 300)})
             return 0
 
     def delete_document(self, doc_id: int) -> Dict[str, Any]:
@@ -2977,7 +3033,7 @@ class UploadService:
                 "chunks_deleted": chunks_deleted,
             }
         except Exception as e:
-            logger.error(f"Error deleting document {doc_id}: {e}")
+            obs.set_error(e)
             con.session.rollback()
             con.close()
             return {"status": "error", "message": str(e), "chunks_deleted": 0}
@@ -3004,5 +3060,5 @@ class UploadService:
             
             return count
         except Exception as e:
-            logger.error(f"Error deleting from Qdrant: {e}")
+            obs.add(failures={"qdrant_delete": obs.trunc(str(e), 300)})
             return 0

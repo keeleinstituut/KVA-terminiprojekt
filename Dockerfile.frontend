@@ -12,17 +12,24 @@ RUN pip install --no-cache-dir \
     python-dotenv==1.0.1 \
     sqlalchemy==2.0.30 \
     psycopg2-binary==2.9.9 \
-    PyJWT>=2.8.0
+    PyJWT>=2.8.0 \
+    opentelemetry-api==1.45.2 \
+    opentelemetry-sdk==1.45.2 \
+    opentelemetry-exporter-otlp-proto-http==1.45.2 \
+    opentelemetry-instrumentation-httpx==0.66b2
 
 # Copy application code
 COPY app/ /app/app/
 COPY utils/ /app/utils/
 COPY config/ /app/config/
 
+ARG GIT_COMMIT=dev
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 EXPOSE 5006
 
 WORKDIR /app/app
 
 # Run the Panel frontend
-ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "1", "--websocket-max-message-size", "157286400"]
+ENTRYPOINT ["panel", "serve", "main.py", "--allow-websocket-origin", "*", "--num-procs", "1", "--websocket-max-message-size", "157286400", "--static-dirs", "kva-static=./static"]
 CMD ["--cookie-secret", "kva_secret", "--basic-auth", "../config/credentials.json"]

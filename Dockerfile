@@ -17,8 +17,6 @@ EXPOSE 5006
 
 ENV PANEL_PORT=5006
 ENV APP_CONFIG=../config/config.json
-ENV LOGGER_CONFIG=../config/logging.config
-ENV LOG_FILE=../logs/app.log
 
 COPY config /app/config
 COPY db /app/db

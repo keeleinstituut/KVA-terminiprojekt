@@ -11,7 +11,6 @@ Models are loaded ONCE at startup for efficiency.
 import os
 import sys
 import json
-import logging
 import queue
 import threading
 from contextlib import asynccontextmanager
@@ -41,15 +40,14 @@ from backend.schemas import (
     PromptSetInfo, PromptSetDetail, PromptSetsListResponse,
     PromptDetail, PromptUpdate,
 )
+from utils import observability as obs
+
+obs.setup("backend")
+
 from backend.services import SearchService, ChatService, UploadService, PromptService
+from backend import telemetry
 from utils.db_connection import Connection
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("backend")
 
 # Global services (initialized once at startup)
 search_service: SearchService = None
@@ -75,39 +73,32 @@ async def lifespan(app: FastAPI):
     Models are loaded here ONCE at startup.
     """
     global search_service, chat_service, upload_service, prompt_service
-    
-    logger.info("=" * 50)
-    logger.info("🚀 KVA Backend - Starting up...")
-    logger.info("=" * 50)
-    
-    # Load configuration
-    config = load_config()
-    logger.info("Configuration loaded")
-    
-    # Initialize services
-    logger.info("Initializing prompt service...")
-    prompt_service = PromptService()
-    prompt_service.initialize()
-    
-    logger.info("Initializing search service...")
-    search_service = SearchService(config)
-    search_service.initialize()
-    
-    logger.info("Initializing chat service...")
-    chat_service = ChatService(config, search_service, prompt_service)
-    chat_service.initialize()
-    
-    logger.info("Initializing upload service...")
-    upload_service = UploadService(config, search_service)
-    
-    logger.info("=" * 50)
-    logger.info("✅ Backend ready!")
-    logger.info("=" * 50)
-    
+
+    with obs.event("backend.startup") as ev:
+        config = load_config()
+
+        with obs.event("backend.startup.prompts", span=True):
+            prompt_service = PromptService()
+            prompt_service.initialize()
+
+        with obs.event("backend.startup.search", span=True):
+            search_service = SearchService(config)
+            search_service.initialize()
+
+        with obs.event("backend.startup.chat", span=True):
+            chat_service = ChatService(config, search_service, prompt_service)
+            chat_service.initialize()
+
+        upload_service = UploadService(config, search_service)
+        ev.add(
+            hybrid_search=search_service.hybrid_enabled,
+            reranking=search_service.reranking_enabled,
+            qdrant_collection=os.getenv("QDRANT_COLLECTION"),
+        )
+
     yield  # Application runs here
-    
-    # Shutdown
-    logger.info("Shutting down...")
+
+    obs.log_event("backend.shutdown")
 
 
 # Create FastAPI app
@@ -126,6 +117,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Tracing, one wide event per request, 4xx reasons, /telemetry
+telemetry.install(app)
 
 
 # Dependency to get services
@@ -182,20 +176,26 @@ async def search(
     """
     try:
         filters = request.filters or {}
+        limit = filters.limit if hasattr(filters, 'limit') else 10
+        files = filters.files if hasattr(filters, 'files') else None
+        only_valid = filters.only_valid if hasattr(filters, 'only_valid') else False
+        obs.add(search={"query": obs.trunc(request.query), "limit": limit,
+                        "files_filter": len(files or []), "only_valid": only_valid})
         results = service.search(
             query=request.query,
-            limit=filters.limit if hasattr(filters, 'limit') else 10,
-            files=filters.files if hasattr(filters, 'files') else None,
-            only_valid=filters.only_valid if hasattr(filters, 'only_valid') else False,
+            limit=limit,
+            files=files,
+            only_valid=only_valid,
         )
-        
+        obs.add(search={"results": len(results)})
+
         return SearchResponse(
             results=[SearchResult(**r) for r in results],
             query=request.query,
             total=len(results),
         )
     except Exception as e:
-        logger.error(f"Search error: {e}")
+        obs.set_error(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -230,7 +230,17 @@ async def chat(
             mode += "+CONTEXT"
         if request.use_reranking:
             mode += "+RERANKING"
-        logger.info(f"Using {mode} extraction mode for query: {request.query}")
+        obs.add(chat={
+            "query": obs.trunc(request.query),
+            "mode": mode,
+            "limit": limit,
+            "files_filter": len(files or []),
+            "only_valid": only_valid,
+            "debug": request.debug,
+            "early_parallelization": request.early_parallelization,
+            "categories": request.output_categories,
+            "prompt_set_id": request.prompt_set_id,
+        })
         
         result = await service.chat_parallel(
             query=request.query,
@@ -252,7 +262,7 @@ async def chat(
             try:
                 term_entry = TermEntry(**result["term_entry"])
             except Exception as e:
-                logger.warning(f"Failed to parse term_entry: {e}")
+                obs.add(chat={"term_entry_parse_error": obs.trunc(str(e), 300)})
         
         # Convert debug_info dict to Pydantic model if present
         debug_info = None
@@ -268,8 +278,12 @@ async def chat(
                     extraction_mode=result["debug_info"].get("extraction_mode", "single"),
                 )
             except Exception as e:
-                logger.warning(f"Failed to parse debug_info: {e}")
+                obs.add(chat={"debug_info_parse_error": obs.trunc(str(e), 300)})
         
+        obs.add(chat={"context_chunks": result.get("context_used"),
+                      "response_chars": len(result.get("response") or ""),
+                      "term_entry": term_entry is not None})
+
         return ChatResponse(
             response=result["response"],
             query=request.query,
@@ -278,7 +292,7 @@ async def chat(
             debug_info=debug_info,
         )
     except Exception as e:
-        logger.error(f"Chat error: {e}")
+        obs.set_error(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -319,7 +333,7 @@ async def get_filters():
         
         return FiltersResponse(documents=documents, keywords=keywords)
     except Exception as e:
-        logger.error(f"Filters error: {e}")
+        obs.set_error(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -375,7 +389,7 @@ async def upload_document(
         
         return UploadResponse(**result)
     except Exception as e:
-        logger.error(f"Upload error: {e}")
+        obs.set_error(e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -471,6 +485,7 @@ async def upload_document_stream(
             )
             result_holder["result"] = result
         except Exception as e:
+            obs.set_error(e)
             result_holder["error"] = str(e)
         finally:
             progress_queue.put(None)  # Signal completion
@@ -478,7 +493,8 @@ async def upload_document_stream(
     def generate_sse():
         """Generator that yields SSE events."""
         # Start upload in background thread
-        upload_thread = threading.Thread(target=upload_worker)
+        # run_in_context: the worker adds upload fields to this request's event
+        upload_thread = threading.Thread(target=obs.run_in_context(upload_worker))
         upload_thread.start()
         
         try:
@@ -521,7 +537,7 @@ async def upload_document_stream(
             yield f"data: {json.dumps(final)}\n\n"
             
         except Exception as e:
-            logger.error(f"SSE error: {e}")
+            obs.set_error(e, reason="sse stream failed")
             yield f"data: {json.dumps({'stage': 'error', 'percentage': 0, 'message': str(e)})}\n\n"
     
     return StreamingResponse(

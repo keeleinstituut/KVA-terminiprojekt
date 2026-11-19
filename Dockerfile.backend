@@ -8,11 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt /app/
-
-# Install PyTorch CPU-only (smaller)
+# Install PyTorch CPU-only (smaller). Before COPY requirements.txt so this
+# large layer stays cached when requirements change.
 RUN pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements.txt /app/
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -25,6 +25,9 @@ RUN python -c "from fastembed import SparseTextEmbedding; SparseTextEmbedding(mo
 COPY backend/ /app/backend/
 COPY utils/ /app/utils/
 COPY config/ /app/config/
+
+ARG GIT_COMMIT=dev
+ENV GIT_COMMIT=${GIT_COMMIT}
 
 EXPOSE 8000
 

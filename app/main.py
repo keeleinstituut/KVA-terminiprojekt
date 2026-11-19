@@ -6,7 +6,8 @@ import panel as pn
 import os
 
 # Import from cached init module (runs only ONCE)
-from init_app import logger, file_upload, llm_view, prompt_view, document_management
+from init_app import file_upload, llm_view, prompt_view, document_management
+from app.telemetry import start_session
 
 
 # Retrieve service name and header color from environment variables
@@ -84,9 +85,7 @@ def create_app(guest_mode: bool = False):
 
 # Session handling
 username = pn.state.user
-logger.info(f"New session: user={username}")
+guest_mode = username == "kylaline"
+start_session(guest_mode=guest_mode)
 
-if username == "kylaline":
-    template = create_app(guest_mode=True).servable()
-else:
-    template = create_app().servable()
+template = create_app(guest_mode=guest_mode).servable()
